@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace Downloader.ViewModels;
 
 /// <summary>下载器自身信息。自更新目前是模拟的：完成后直接改写版本号，模拟重启后的新版本。</summary>
@@ -5,7 +7,10 @@ public static class AppInfo
 {
     public const string Name = "CAN 下载器";
 
-    public static string Version { get; set; } = "1.1.0";
+    /// <summary>取自 Downloader.csproj 的 &lt;Version&gt;（去掉编译时附加的 +提交号）。</summary>
+    public static string Version { get; set; } =
+        (typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0")
+        .Split('+')[0];
 }
 
 /// <summary>版本号比较：按点分段逐段比较数字（1.10.0 &gt; 1.9.2，AIRAC 2611 &gt; 2610）。</summary>
