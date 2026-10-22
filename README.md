@@ -1,17 +1,18 @@
 # CAN 下载器
 
-基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，可在 Windows / macOS / Linux 上运行（目前发布的客户端都是 Windows 版）。
+基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client，Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，可在 Windows / macOS / Linux 上运行（目前发布的客户端都是 Windows 版）。
 
-已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载。下载器自身的更新 API 还没有提供，启动时总是“已是最新版本”。
+已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载、下载器自更新。
 
 | 功能 | API |
 |---|---|
 | 密码登录（CAN ID 或邮箱） | `POST /api/v1/auth/signin` |
 | 邮箱验证码登录 | `POST /api/v1/auth/code/request`、`/api/v1/auth/code/verify` |
 | 自动登录时校验会话 / 退出登录 | `GET /api/v1/auth/session`、`POST /api/v1/auth/signout` |
-| 软件列表与版本 | `GET /api/v1/clients/latest` |
+| 软件列表与版本 | `GET /api/v1/clients/latest`：`clients` 是 can-audio 的客户端合集；`apps` 是独立发布的程序（`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明 |
+| 下载器自更新 | `apps.can-downloader`（下载地址同下） |
 | 下载（下载源“本站”） | `GET /api/v1/clients/download/{client}`，支持 Range 续传 |
-| 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址 |
+| 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址；私有仓库（CAN Pilot Client、下载器）没有公开地址，始终走本站 |
 
 ## 流程
 
@@ -19,7 +20,7 @@
 
 | 界面 | 说明 |
 |---|---|
-| 启动窗口 | 打开后先检查下载器自身更新：已是最新则直接进入登录；有新版本时显示更新说明，可“立即更新”（下载 → 安装 → 重启）或“稍后”（必需更新不能跳过）；连接失败可重试或离线模式进入 |
+| 启动窗口 | 打开后先检查下载器自身更新：已是最新则直接进入登录；有新版本时显示更新说明（来自 GitHub 发布说明），可“立即更新”或“稍后”；连接失败可重试或离线模式进入 |
 | 登录窗口 | CAN ID 或邮箱 + 密码，或邮箱验证码；记住账号、自动登录（会话保存在本机，Windows 上用 DPAPI 加密）；注册账号、忘记密码在浏览器中打开 ceruleanavi.net。登录后才能进入主界面下载；也可选“离线模式”，不登录进入，只能查看上次缓存的软件列表 |
 | 主窗口 | 工具栏（检查更新、全部更新、设置；离线时为“登录”）、下载速度汇总、账号菜单（账号信息、退出登录）；提示条报告新上架的软件、可更新的软件、下载器新版本、离线模式 |
 | 软件库 | 左侧按分类分组、可搜索；**软件来自 API 的发布信息**，API 新增客户端后点“检查更新”即自动出现，移除的已安装软件标记“已下架” |
@@ -51,7 +52,7 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 
 ## 安装过程
 
-- 校验：完整读取 zip 中的每个文件
+- 校验：发布信息带 SHA-256 时（`apps` 里的程序）总是核对；“下载完成后校验文件”另外完整读取 zip 中的每个文件
 - 解压到安装目录，去掉 zip 里与软件同名的顶层目录；更新时删除旧版本多出来的文件
 - 卸载只删除安装记录里的文件，用户自己放进去的文件保留
 
@@ -63,6 +64,16 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 dotnet run --project src/Downloader
 dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
 ```
+
+## 自更新
+
+1. 下载新版本的 zip，核对 SHA-256，把其中的 `Downloader.exe` 解压为 `Downloader.exe.new`
+2. 以 `Downloader.exe.new --apply-update <进程号>` 启动新版本，当前进程退出
+3. 新版本等旧进程退出，把自己复制到 `Downloader.exe` 并启动它；最后启动的程序删除 `.new`
+
+正在运行的 exe 文件始终不动：单文件程序按需从 exe 读取程序集，运行中改名会导致之后加载失败。这套流程从 0.0.2 起生效（0.0.1 没有自更新）；编译输出目录里的开发版不会自更新。
+
+开发时可以用环境变量 `CAN_API_URL` 指向本地运行的 can-api（启动时会在日志里提示）。
 
 ## 发布
 
@@ -108,6 +119,6 @@ src/Downloader/
 - [x] 自更新、登录 / 离线模式、按清单生成软件库、下载队列的界面
 - [x] CAN 账号登录（密码 / 邮箱验证码、自动登录）
 - [x] 从 API 获取软件列表；真实下载（续传、限速、并发、本站 / GitHub 下载源）、校验与安装
-- [ ] 下载器自身的更新（等 API 提供发布信息）
+- [x] 下载器自身的更新、CAN Pilot Client（需要 can-api 的 `apps` 部署上线，并配置能读取私有仓库的 `GITHUB_TOKEN`）
 - [ ] can-voice 新一代客户端（`/api/v1/voice/*`，目前还没有发布可安装的构建）
 - [x] 设置保存、便携目录、按日期分文件的日志、单文件发布

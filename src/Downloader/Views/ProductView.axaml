@@ -31,6 +31,9 @@
             <Border Classes="tag">
               <TextBlock Text="{Binding CategoryName}" />
             </Border>
+            <Border Classes="tag" IsVisible="{Binding IsPrerelease}" ToolTip.Tip="预发布版本，可能不稳定">
+              <TextBlock Text="预发布" />
+            </Border>
             <Border Classes="tag update" IsVisible="{Binding HasUpdate}">
               <TextBlock Text="可更新" />
             </Border>

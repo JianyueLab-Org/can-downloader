@@ -77,6 +77,8 @@
           </Border>
           <TextBlock Classes="caption" Foreground="{DynamicResource Brush.State.Update}" IsVisible="{Binding IsMandatory}"
                      Text="这是必需更新，旧版本将无法获取软件列表。" />
+          <TextBlock Classes="caption" Foreground="{DynamicResource Brush.State.Error}" TextWrapping="Wrap"
+                     Text="{Binding UpdateErrorText}" IsVisible="{Binding HasUpdateError}" />
         </StackPanel>
       </Border>
 

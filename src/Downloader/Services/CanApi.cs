@@ -16,7 +16,12 @@ public sealed record SavedSession(string Token, string Domain, DateTimeOffset? E
 public sealed class CanApi
 {
     public const string ApiHost = "api.ceruleanavi.net";
-    public static readonly Uri BaseUri = new($"https://{ApiHost}/");
+    /// <summary>API 地址。环境变量 CAN_API_URL 可以指向本地运行的 can-api，仅供开发测试。</summary>
+    public static readonly Uri BaseUri =
+        Environment.GetEnvironmentVariable("CAN_API_URL") is { Length: > 0 } custom
+        && Uri.TryCreate(custom.TrimEnd('/') + "/", UriKind.Absolute, out var uri)
+            ? uri
+            : new Uri($"https://{ApiHost}/");
     public static readonly Uri WebsiteUri = new("https://ceruleanavi.net/");
     public static string SignUpUrl => new Uri(WebsiteUri, "signup").ToString();
     public static string ResetPasswordUrl => new Uri(WebsiteUri, "reset").ToString();

@@ -27,6 +27,7 @@ public partial class App : Application
         {
             _desktop = desktop;
             desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            SelfUpdater.CleanupOldVersion();
             CanApi.Shared.Configure(_settings);
             // 命令行 --offline：演示无法连接更新服务器
             var offline = desktop.Args?.Contains("--offline") == true;
@@ -48,6 +49,7 @@ public partial class App : Application
     {
         var vm = new SelfUpdateViewModel(offline, autoUpdate);
         var splash = new SplashWindow { DataContext = vm };
+        vm.RestartRequested += (_, _) => _desktop!.Shutdown();
         vm.Completed += async (_, manifest) =>
         {
             if (manifest is null)

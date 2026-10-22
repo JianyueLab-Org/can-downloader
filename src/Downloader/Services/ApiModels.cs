@@ -32,6 +32,32 @@ public sealed class ClientsLatest
     public string? Notes { get; set; }
     /// <summary>以客户端名称为键（audio-for-can 等）。某个构建失败时服务器不会列出它。</summary>
     public Dictionary<string, ClientBuild> Clients { get; set; } = [];
+
+    /// <summary>
+    /// 独立发布的程序（can-pilot、can-downloader），各自有版本号。旧版 API 没有这一项。
+    /// can-downloader 是下载器自己，用于自更新，不出现在软件库里。
+    /// </summary>
+    public Dictionary<string, AppBuild> Apps { get; set; } = [];
+}
+
+/// <summary><c>clients/latest</c> 里 <c>apps</c> 的一项。</summary>
+public sealed class AppBuild
+{
+    public string Name { get; set; } = "";
+    public string Version { get; set; } = "";
+    public DateTimeOffset? PublishedAt { get; set; }
+    public bool Prerelease { get; set; }
+    public long Size { get; set; }
+    /// <summary>安装包的 SHA-256（小写十六进制），下载后核对。</summary>
+    public string? Sha256 { get; set; }
+    /// <summary>经 api.ceruleanavi.net 中转的下载地址。</summary>
+    public string Download { get; set; } = "";
+    /// <summary>GitHub 地址；私有仓库没有。</summary>
+    public string? Origin { get; set; }
+    /// <summary>发布页网址。</summary>
+    public string? Notes { get; set; }
+    /// <summary>发布说明正文（Markdown）。</summary>
+    public string? Changelog { get; set; }
 }
 
 public sealed class ClientBuild

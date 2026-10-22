@@ -20,10 +20,9 @@ public enum SelfUpdateStage
 }
 
 /// <summary>
-/// 启动窗口：打开下载器时连接 CAN API 获取软件清单并检查下载器自身的更新，完成（或跳过）后进入登录窗口；
-/// 无法连接时可离线模式进入主界面。
-/// 注意：API 目前没有下载器自身的发布信息（<see cref="UpdateManifest.Launcher"/> 为 null），所以总是“已是最新版本”；
-/// 下面的下载、安装流程仍是模拟的，等 API 提供下载器的发布信息后再接入。
+/// 启动窗口：打开下载器时连接 CAN API 获取软件清单并检查下载器自身的更新（API <c>apps</c> 里的 can-downloader），
+/// 完成（或跳过）后进入登录窗口；无法连接时可离线模式进入主界面。
+/// 更新：下载新版本、核对 SHA-256，由 <see cref="SelfUpdater"/> 交给新版本替换程序文件并重启。
 /// </summary>
 public sealed partial class SelfUpdateViewModel : ViewModelBase
 {
@@ -41,6 +40,9 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
 
     /// <summary>检查流程结束。参数为获取到的清单，进入登录窗口；选择离线模式时为 null，直接进入主界面。</summary>
     public event EventHandler<UpdateManifest?>? Completed;
+
+    /// <summary>新版本已启动并会替换程序文件，当前进程应退出。</summary>
+    public event EventHandler? RestartRequested;
 
     public UpdateManifest? Manifest { get; private set; }
 
@@ -69,6 +71,13 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
     [ObservableProperty] private string _releaseInfo = "";
     [ObservableProperty] private bool _isMandatory;
     public List<string> Notes { get; private set; } = [];
+
+    /// <summary>上次“立即更新”失败的原因，显示在更新说明下方。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUpdateError))]
+    private string _updateErrorText = "";
+
+    public bool HasUpdateError => UpdateErrorText.Length > 0;
 
     public async Task StartAsync()
     {
@@ -108,7 +117,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         }
 
         LatestVersion = release.Version;
-        ReleaseInfo = $"{release.ReleaseDate} 发布 · {Format.Size(release.Size)}";
+        ReleaseInfo = $"{release.ReleaseDate} 发布 · {Format.Size(release.Size)}{(release.Prerelease ? " · 预发布" : "")}";
         IsMandatory = release.Mandatory;
         Notes = release.Notes;
         OnPropertyChanged(nameof(Notes));
@@ -118,55 +127,122 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
             await UpdateNowAsync();
     }
 
+    /// <summary>下载新版本、核对 SHA-256、交给新版本替换并重启。失败时回到“发现新版本”并显示原因。</summary>
     [RelayCommand]
     private async Task UpdateNowAsync()
     {
-        if (Manifest?.Launcher is null)
+        if (Manifest?.Launcher is not { } release)
             return;
+        UpdateErrorText = "";
+        if (SelfUpdater.CannotReplaceReason is { } reason)
+        {
+            UpdateErrorText = reason;
+            return;
+        }
+        if (!Uri.TryCreate(CanApi.BaseUri, release.DownloadUrl, out var url))
+        {
+            UpdateErrorText = "发布信息里没有下载地址。";
+            return;
+        }
 
         _downloadCts = new CancellationTokenSource();
         var token = _downloadCts.Token;
-        var total = (double)Manifest.Launcher.Size;
-        var downloaded = 0d;
-
         Stage = SelfUpdateStage.Downloading;
         IsIndeterminate = false;
         Progress = 0;
-        StatusText = $"正在下载 {AppInfo.Name} {LatestVersion}";
+        StatusText = $"正在下载 {AppInfo.Name} {release.Version}";
+        DetailText = $"正在连接 {url.Host}…";
+        var zip = Path.Combine(AppPaths.Downloads, $"CAN-Downloader-{release.Version}.zip");
+        Log.Info($"开始更新下载器 {AppInfo.Version} → {release.Version}");
 
         try
         {
-            var random = new Random();
-            while (downloaded < total)
+            var progress = new DownloadProgress();
+            var download = Task.Run(() => PackageInstaller.DownloadAsync(url, zip, release.Size, progress, () => 0, token), token);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            long last = -1;
+            var speed = 0d;
+            while (!download.IsCompleted)
             {
-                await Task.Delay(80, token);
-                var speed = (5.5 + random.NextDouble() * 2.5) * 1024 * 1024;
-                downloaded = Math.Min(total, downloaded + speed * 0.08);
-                Progress = downloaded / total * 100;
-                DetailText = $"{Format.Size(downloaded)} / {Format.Size(total)} · {Format.Speed(speed)} · {Format.Remaining((total - downloaded) / speed)}";
+                await Task.WhenAny(download, Task.Delay(250, CancellationToken.None));
+                var (done, total) = (progress.Downloaded, progress.Total);
+                if (total <= 0)
+                    continue;
+                if (last >= 0)
+                {
+                    var instant = (done - last) / Math.Max(0.001, clock.Elapsed.TotalSeconds);
+                    speed = speed <= 0 ? instant : speed * 0.7 + instant * 0.3;
+                }
+                clock.Restart();
+                last = done;
+                Progress = done * 100.0 / total;
+                var remaining = speed > 1 ? Format.Remaining((total - done) / speed) : "正在计算剩余时间";
+                DetailText = $"{Format.Size(done)} / {Format.Size(total)} · {Format.Speed(speed)} · {remaining}";
             }
+            await download;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+            Log.Info("取消更新下载器");
             Stage = SelfUpdateStage.Available;
+            return;
+        }
+        catch (Exception ex)
+        {
+            Fail("下载失败", ex);
             return;
         }
 
         Stage = SelfUpdateStage.Installing;
         IsIndeterminate = true;
         StatusText = "正在安装更新…";
-        DetailText = "校验文件签名";
-        await Task.Delay(600);
-        DetailText = "替换程序文件";
-        await Task.Delay(600);
+        try
+        {
+            DetailText = "校验文件";
+            await Task.Run(() =>
+            {
+                if (release.Sha256 is { } sha256)
+                    PackageInstaller.VerifySha256(zip, sha256);
+                PackageInstaller.Verify(zip);
+            });
+            DetailText = "准备新版本";
+            await Task.Run(() => SelfUpdater.Stage(zip));
+        }
+        catch (Exception ex)
+        {
+            if (ex is InvalidDataException)
+                TryDelete(zip);
+            Fail("安装更新失败", ex);
+            return;
+        }
+
+        TryDelete(zip);
+        try
+        {
+            SelfUpdater.LaunchApplier();
+        }
+        catch (Exception ex)
+        {
+            Fail("无法启动新版本", ex);
+            return;
+        }
         StatusText = "正在重启…";
         DetailText = "";
-        await Task.Delay(500);
+        Log.Info($"交给新版本 {release.Version} 完成替换，退出");
+        RestartRequested?.Invoke(this, EventArgs.Empty);
+    }
 
-        // 模拟重启后的新版本
-        AppInfo.Version = LatestVersion;
-        CurrentVersion = LatestVersion;
-        Completed?.Invoke(this, Manifest);
+    private void Fail(string title, Exception ex)
+    {
+        Log.Error($"更新下载器：{title}", ex);
+        Stage = SelfUpdateStage.Available;
+        UpdateErrorText = $"{title}：{ex.Message}";
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 缓存删不掉不影响 */ }
     }
 
     [RelayCommand]

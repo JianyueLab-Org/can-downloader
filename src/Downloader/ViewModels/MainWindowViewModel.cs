@@ -482,12 +482,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var installDir = product.InstallPath;
         try
         {
-            if (Settings.VerifyAfterDownload)
+            // 发布方提供了 SHA-256 时总是核对；“下载完成后校验文件”另外完整读取一遍压缩包
+            var sha256 = product.Sha256;
+            if (sha256 is not null || Settings.VerifyAfterDownload)
             {
                 product.PhaseText = "正在校验文件…";
                 try
                 {
-                    await Task.Run(() => PackageInstaller.Verify(zip));
+                    await Task.Run(() =>
+                    {
+                        if (sha256 is not null)
+                            PackageInstaller.VerifySha256(zip, sha256);
+                        if (Settings.VerifyAfterDownload)
+                            PackageInstaller.Verify(zip);
+                    });
                 }
                 catch (InvalidDataException)
                 {

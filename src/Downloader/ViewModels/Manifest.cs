@@ -25,7 +25,11 @@ public sealed class LauncherRelease
     public string ReleaseDate { get; set; } = "";
     public long Size { get; set; }
     public bool Mandatory { get; set; }
+    public bool Prerelease { get; set; }
     public List<string> Notes { get; set; } = [];
+    /// <summary>新版下载器安装包（zip，内含 Downloader.exe）的下载地址与 SHA-256。</summary>
+    public string? DownloadUrl { get; set; }
+    public string? Sha256 { get; set; }
 }
 
 public sealed class ManifestCategory
@@ -55,6 +59,10 @@ public sealed class ManifestProduct
     public string? OriginUrl { get; set; }
     /// <summary>发布页（完整的更新说明）。</summary>
     public string? NotesUrl { get; set; }
+    /// <summary>安装包的 SHA-256；有的话下载后核对。</summary>
+    public string? Sha256 { get; set; }
+    /// <summary>预发布版本。</summary>
+    public bool Prerelease { get; set; }
     /// <summary>依赖的其他软件 Id。</summary>
     public List<string> Requires { get; set; } = [];
     public List<ManifestComponent> Components { get; set; } = [];
@@ -98,7 +106,7 @@ public sealed class CatalogEntry
 }
 
 /// <summary>
-/// 清单来源：<c>GET /api/v1/clients/latest</c> 加上 catalog.json 里的显示信息。
+/// 清单来源：<c>GET /api/v1/clients/latest</c>（<c>clients</c> 与 <c>apps</c>）加上 catalog.json 里的显示信息。
 /// 每次获取成功后缓存到本机，离线模式显示缓存的软件列表。
 /// </summary>
 public static class ManifestSource
@@ -146,42 +154,26 @@ public static class ManifestSource
         }
     }
 
+    /// <summary>下载器自己在 API <c>apps</c> 里的名字，用于自更新，不放进软件库。</summary>
+    public const string LauncherAppId = "can-downloader";
+
     private static UpdateManifest Build(ClientsLatest latest, Catalog catalog)
     {
         var published = latest.PublishedAt ?? DateTimeOffset.UtcNow;
-        var date = published.ToLocalTime().ToString("yyyy-MM-dd");
         var entries = catalog.Products.ToDictionary(p => p.Id);
         var order = catalog.Products.Select(p => p.Id).ToList();
 
-        var products = latest.Clients
-            .OrderBy(c => order.IndexOf(c.Key) is var i and >= 0 ? i : int.MaxValue)
-            .ThenBy(c => c.Key, StringComparer.Ordinal)
-            .Select(c =>
-            {
-                var (id, build) = (c.Key, c.Value);
-                var entry = entries.GetValueOrDefault(id);
-                var version = build.Version.Length > 0 ? build.Version : latest.Version;
-                return new ManifestProduct
-                {
-                    Id = id,
-                    Name = entry?.Name ?? id,
-                    Category = entry?.Category ?? OtherCategory,
-                    Icon = entry?.Icon ?? id[..Math.Min(2, id.Length)].ToUpperInvariant(),
-                    Color = entry?.Color ?? "",
-                    Summary = entry?.Summary ?? "",
-                    Description = entry?.Description ?? entry?.Summary ?? "",
-                    Version = version,
-                    ReleaseDate = date,
-                    Size = build.Size,
-                    Executable = entry?.Executable ?? (OperatingSystem.IsWindows() ? id + ".exe" : null),
-                    DownloadUrl = build.Download,
-                    OriginUrl = build.Origin,
-                    NotesUrl = latest.Notes,
-                    Requires = entry?.Requires ?? [],
-                    Components = [new ManifestComponent { Id = "core", Name = "主程序", Size = build.Size, Required = true }],
-                    Changelog = [new ManifestChangelog { Version = version, Date = date }]
-                };
-            })
+        // CAN 客户端合集（同一个版本）与独立发布的程序（各自的版本）
+        var bundle = latest.Clients.Select(c => Product(c.Key, entries.GetValueOrDefault(c.Key),
+            c.Value.Version.Length > 0 ? c.Value.Version : latest.Version, latest.PublishedAt, c.Value.Size,
+            c.Value.Download, c.Value.Origin, latest.Notes, sha256: null, prerelease: false, changelog: null));
+        var apps = latest.Apps.Where(a => a.Key != LauncherAppId).Select(a => Product(a.Key, entries.GetValueOrDefault(a.Key),
+            a.Value.Version, a.Value.PublishedAt, a.Value.Size, a.Value.Download, a.Value.Origin, a.Value.Notes,
+            a.Value.Sha256, a.Value.Prerelease, a.Value.Changelog));
+
+        var products = bundle.Concat(apps)
+            .OrderBy(p => order.IndexOf(p.Id) is var i and >= 0 ? i : int.MaxValue)
+            .ThenBy(p => p.Id, StringComparer.Ordinal)
             .ToList();
 
         var categories = catalog.Categories.ToList();
@@ -192,8 +184,87 @@ public static class ManifestSource
         {
             PublishedAt = published,
             Server = CanApi.ApiHost,
+            Launcher = latest.Apps.GetValueOrDefault(LauncherAppId) is { } launcher ? Launcher(launcher) : null,
             Categories = categories,
             Products = products
         };
     }
+
+    private static ManifestProduct Product(string id, CatalogEntry? entry, string version, DateTimeOffset? publishedAt,
+        long size, string download, string? origin, string? notesUrl, string? sha256, bool prerelease, string? changelog)
+    {
+        var date = Date(publishedAt);
+        return new ManifestProduct
+        {
+            Id = id,
+            Name = entry?.Name ?? id,
+            Category = entry?.Category ?? OtherCategory,
+            Icon = entry?.Icon ?? id[..Math.Min(2, id.Length)].ToUpperInvariant(),
+            Color = entry?.Color ?? "",
+            Summary = entry?.Summary ?? "",
+            Description = entry?.Description ?? entry?.Summary ?? "",
+            Version = version,
+            ReleaseDate = date,
+            Size = size,
+            Prerelease = prerelease,
+            Executable = entry?.Executable ?? (OperatingSystem.IsWindows() ? id + ".exe" : null),
+            DownloadUrl = download,
+            OriginUrl = origin,
+            NotesUrl = notesUrl,
+            Sha256 = sha256,
+            Requires = entry?.Requires ?? [],
+            Components = [new ManifestComponent { Id = "core", Name = "主程序", Size = size, Required = true }],
+            Changelog = [new ManifestChangelog { Version = version, Date = date, Changes = ReleaseNotes.Summarize(changelog) }]
+        };
+    }
+
+    private static LauncherRelease Launcher(AppBuild build) => new()
+    {
+        Version = build.Version,
+        ReleaseDate = Date(build.PublishedAt),
+        Size = build.Size,
+        Prerelease = build.Prerelease,
+        Notes = ReleaseNotes.Summarize(build.Changelog),
+        DownloadUrl = build.Download,
+        Sha256 = build.Sha256
+    };
+
+    private static string Date(DateTimeOffset? value) => (value ?? DateTimeOffset.UtcNow).ToLocalTime().ToString("yyyy-MM-dd");
+}
+
+/// <summary>把 GitHub 发布说明（Markdown）整理成几行纯文字，用于更新日志和下载器的更新说明。</summary>
+public static class ReleaseNotes
+{
+    private const int MaxLines = 12;
+
+    /// <summary>优先取列表项；没有列表时取普通段落。去掉标题、代码块和行内的 Markdown 标记。</summary>
+    public static List<string> Summarize(string? markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            return [];
+
+        var bullets = new List<string>();
+        var paragraphs = new List<string>();
+        var inCode = false;
+        foreach (var raw in markdown.Replace("\r", "").Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                inCode = !inCode;
+                continue;
+            }
+            if (inCode || line.Length == 0 || line.StartsWith('#') || line.StartsWith('|') || line.StartsWith('>'))
+                continue;
+
+            if (line.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("* ", StringComparison.Ordinal))
+                bullets.Add(Plain(line[2..]));
+            else if (!bullets.Any())
+                paragraphs.Add(Plain(line));
+        }
+        return (bullets.Count > 0 ? bullets : paragraphs).Where(l => l.Length > 0).Take(MaxLines).ToList();
+    }
+
+    private static string Plain(string text) =>
+        text.Replace("**", "").Replace("`", "").Replace("__", "").Trim();
 }

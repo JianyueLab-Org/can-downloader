@@ -30,6 +30,16 @@
       "executable": "atis-for-can.exe"
     },
     {
+      "id": "can-pilot",
+      "name": "CAN Pilot Client",
+      "category": "pilot",
+      "icon": "CP",
+      "color": "#4C8BF5",
+      "summary": "MSFS 与 X-Plane 通用的飞行员客户端（新版）",
+      "description": "新一代 C# 飞行员客户端：一个程序同时支持 MSFS 2020 / 2024 和 X-Plane 11 / 12，完成登录、FSD 连线、语音、消息和飞行计划，不需要 Python。X-Plane 插件在安装目录的 XPC_for_CAN-plugin.zip 里。",
+      "executable": "can-pilot.exe"
+    },
+    {
       "id": "msfs-for-can",
       "name": "MSFS for CAN",
       "category": "pilot",

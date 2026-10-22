@@ -112,6 +112,18 @@ public static class PackageInstaller
         }
     }
 
+    /// <summary>核对 SHA-256（发布方提供的值，小写十六进制）。不一致时抛出 <see cref="InvalidDataException"/>。</summary>
+    public static void VerifySha256(string path, string expected)
+    {
+        using var stream = File.OpenRead(path);
+        var actual = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
+        if (!string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Warn($"SHA-256 不符：{Path.GetFileName(path)} 应为 {expected}，实际 {actual}");
+            throw new InvalidDataException("安装包的 SHA-256 与发布信息不符。");
+        }
+    }
+
     /// <summary>完整读取每个文件，确认压缩包没有损坏。损坏时抛出 <see cref="InvalidDataException"/>。</summary>
     public static void Verify(string zipPath)
     {

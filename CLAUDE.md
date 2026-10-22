@@ -4,7 +4,7 @@
 
 ## 项目概况
 
-CAN 下载器：Avalonia 12.1 + .NET 10，用来安装、更新 CAN 的各个客户端。已接入 CAN API（线上 https://api.ceruleanavi.net，源码在 `G:\can-api-main`）：登录、软件列表、下载都是真实的；下载器自身的更新 API 尚未提供，`SelfUpdateViewModel` 的下载安装流程仍是模拟。界面风格与 `can-client-ui`（飞行员 / 管制员 / 通播客户端）一致，`Styles/Theme/*`、`TitleBar`、`DialogView`、`ResizeGrips` 是那边的副本（命名空间不同），改动通用外观时两边要同步。
+CAN 下载器：Avalonia 12.1 + .NET 10，用来安装、更新 CAN 的各个客户端。已接入 CAN API（线上 https://api.ceruleanavi.net，源码在 `G:\can-api-main`）：登录、软件列表、下载、下载器自更新都是真实的。界面风格与 `can-client-ui`（飞行员 / 管制员 / 通播客户端）一致，`Styles/Theme/*`、`TitleBar`、`DialogView`、`ResizeGrips` 是那边的副本（命名空间不同），改动通用外观时两边要同步。
 
 ```bash
 dotnet build                                   # 通过 CanDownloader.slnx 编译，应当 0 警告 0 错误
@@ -21,7 +21,8 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 | 启动窗口：先检查下载器自身更新（检查中 → 已是最新 / 发现新版本 → 下载 → 安装并重启；失败时 重试 / 离线模式） | `Views/SplashWindow.axaml`，`ViewModels/SelfUpdateViewModel.cs` |
 | 登录窗口：**登录后才能进入主界面**；密码登录或邮箱验证码登录，自动登录时会话加密保存在本机；也可以选离线模式（不登录，只能看缓存的软件列表，不能下载）。主界面离线时工具栏有“登录”，登录后右上角账号菜单可退出登录 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs` |
 | CAN API 客户端（cookie 会话 `can_session`、错误码转中文、代理与超时取自设置） | `Services/CanApi.cs`、`Services/ApiModels.cs` |
-| 软件清单：由 `GET /api/v1/clients/latest` 生成，显示信息（分类、名称、图标、简介）来自 `Assets/catalog.json`。**软件库完全由 API 决定**，API 新增客户端即自动出现，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，`Assets/catalog.json`（复制到输出目录根） |
+| 软件清单：由 `GET /api/v1/clients/latest` 生成——`clients`（can-audio 合集，同一版本）加 `apps`（独立发布的 can-pilot 等，各自版本、SHA-256、发布说明）；`apps.can-downloader` 是下载器自己，用于自更新，不进软件库。显示信息（分类、名称、图标、简介）来自 `Assets/catalog.json`。**软件库完全由 API 决定**，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，`Assets/catalog.json` |
+| 自更新：下载 → 核对 SHA-256 → 解压为 `Downloader.exe.new` → 以 `--apply-update <pid>` 启动它并退出 → 新版本复制自己到原位置再启动。**不要在运行中给 exe 改名后继续运行**（单文件程序之后加载程序集会失败） | `Services/SelfUpdater.cs`、`ViewModels/SelfUpdateViewModel.cs` |
 | 下载（续传、限速、本站 / GitHub 下载源）、zip 校验、解压安装、卸载 | `Services/PackageInstaller.cs` |
 | **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、账号、清单缓存）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。不要改回 %LocalAppData% | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
 | 安装位置：设置里的默认安装目录 + 安装对话框里询问（设置可关闭“安装时询问安装位置”，关闭后没有其他可选项时不弹对话框） | `Views/InstallView.axaml`、`ViewModels/InstallViewModel.cs`、`Views/FolderPicker.cs` |
@@ -62,6 +63,7 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 - 单文件发布时 SkiaSharp 包会带出 100 MB 的原生 .pdb，发布配置里已排除。
 - PowerShell 5 读不带 BOM 的 UTF-8 脚本会把中文弄乱；UI Automation 脚本里有中文时存成带 BOM 的文件。
 - can-api 的登录接口要求 `Content-Type: application/json`，否则返回 415。
+- 联调未部署的 can-api：设环境变量 `CAN_API_URL=http://127.0.0.1:端口` 启动下载器。
 
 ## 验证方式
 

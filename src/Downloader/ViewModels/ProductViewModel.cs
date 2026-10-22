@@ -66,6 +66,10 @@ public sealed partial class ProductViewModel : LibraryEntry
     /// <summary>下载地址：本站中转与 GitHub 原始地址，按设置里的下载源选择。</summary>
     public string? DownloadUrl { get; private set; }
     public string? OriginUrl { get; private set; }
+    /// <summary>安装包的 SHA-256，有的话下载后核对。</summary>
+    public string? Sha256 { get; private set; }
+
+    [ObservableProperty] private bool _isPrerelease;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNotesUrl))]
@@ -215,6 +219,8 @@ public sealed partial class ProductViewModel : LibraryEntry
         Executable = product.Executable;
         DownloadUrl = product.DownloadUrl;
         OriginUrl = product.OriginUrl;
+        Sha256 = product.Sha256;
+        IsPrerelease = product.Prerelease;
         NotesUrl = product.NotesUrl;
         OnPropertyChanged(nameof(CanDownload));
         OnPropertyChanged(nameof(IsPrimaryEnabled));
