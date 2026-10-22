@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.Settings.UpdatePage"
+             x:DataType="vm:SettingsViewModel">
+  <!-- 更新：渠道、服务器、检查频率、自动更新 -->
+  <StackPanel Width="340" HorizontalAlignment="Left">
+    <TextBlock Classes="label" Text="更新渠道" />
+    <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding Channel}" HorizontalAlignment="Stretch" />
+    <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"
+               Text="测试版与开发版会更早收到新功能，也可能不稳定。下载器与已安装的软件使用同一渠道。" />
+
+    <TextBlock Classes="label" Text="更新服务器" />
+    <ComboBox ItemsSource="{Binding Servers}" SelectedItem="{Binding Server}" HorizontalAlignment="Stretch" />
+
+    <TextBlock Classes="label" Text="自动检查更新" />
+    <ComboBox ItemsSource="{Binding CheckIntervals}" SelectedItem="{Binding CheckInterval}" HorizontalAlignment="Stretch" />
+
+    <CheckBox Margin="0,12,0,0" Content="发现新版本时自动更新已安装的软件" IsChecked="{Binding AutoUpdateInstalled}" />
+    <CheckBox Content="软件库有新上架的软件时提示" IsChecked="{Binding ShowNewProducts}" />
+  </StackPanel>
+</UserControl>

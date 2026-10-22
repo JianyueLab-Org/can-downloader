@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.InstallView"
+             x:DataType="vm:InstallViewModel"
+             Width="400">
+  <!-- 安装对话框：版本、安装位置、组件（来自清单）、依赖项、磁盘空间 -->
+  <StackPanel>
+    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+      <Border Classes="tile" Background="{Binding Product.TileBackground}">
+        <TextBlock Text="{Binding Product.Icon}" Foreground="{Binding Product.TileForeground}" />
+      </Border>
+      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+        <TextBlock Classes="productName" Text="{Binding Product.Name}" />
+        <TextBlock Classes="caption mono"><Run Text="{Binding Product.LatestVersion}" /><Run Text=" · " /><Run Text="{Binding Product.ReleaseDate}" /></TextBlock>
+      </StackPanel>
+    </Grid>
+
+    <TextBlock Classes="label" Margin="0,14,0,4" Text="安装位置" />
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
+      <TextBox Classes="mono" Text="{Binding InstallPath}" />
+      <Button Grid.Column="1" Content="浏览…" />
+    </Grid>
+
+    <TextBlock Classes="label" Text="组件" />
+    <Border Classes="well">
+      <ItemsControl ItemsSource="{Binding Components}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ComponentViewModel">
+            <Grid ColumnDefinitions="*,Auto" Margin="6,0">
+              <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsOptional}" />
+              <TextBlock Grid.Column="1" Classes="caption mono" VerticalAlignment="Center" Text="{Binding SizeText}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Border>
+
+    <CheckBox Margin="0,8,0,0" Content="创建桌面快捷方式" IsChecked="{Binding CreateShortcut}" />
+
+    <!-- 依赖：清单 requires 中尚未安装的软件 -->
+    <StackPanel IsVisible="{Binding HasDependencies}">
+      <CheckBox Content="同时安装依赖项" IsChecked="{Binding InstallDependencies}" />
+      <TextBlock Classes="caption" Margin="24,0,0,0" Foreground="{DynamicResource Brush.State.Update}"
+                 TextWrapping="Wrap" Text="{Binding DependencyText}" />
+    </StackPanel>
+
+    <TextBlock Classes="caption mono" Margin="0,12,0,0"><Run Text="{Binding RequiredText}" /><Run Text=" · " /><Run Text="{Binding AvailableText}" /></TextBlock>
+  </StackPanel>
+</UserControl>

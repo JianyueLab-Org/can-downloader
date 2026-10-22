@@ -1,0 +1,184 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Downloader.ViewModels"
+        xmlns:views="using:Downloader.Views"
+        x:Class="Downloader.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="CAN 下载器"
+        Width="1000" Height="640"
+        MinWidth="720" MinHeight="440"
+        WindowDecorations="None"
+        BorderBrush="{DynamicResource Brush.Border.Control}"
+        BorderThickness="1"
+        WindowStartupLocation="CenterScreen">
+
+  <!--
+    ┌────────────────────────────────────────────────────────────────────┐
+    │ [检查更新][全部更新（2）] [设置][⋯]  ↓ 8.4 MB/s  v1.2.0 张三（1234567）− ✕ │
+    ├────────────────────────────────────────────────────────────────────┤
+    │ ▌软件库新增 1 个项目：雷达管制客户端                        [查看] ✕ │  提示条
+    ├───────────────────┬────────────────────────────────────────────────┤
+    │ [搜索软件      ]  │ [PC] 飞行员客户端  客户端  1.3.2 → 1.4.0 [更新][⋯]│
+    │ 客户端         3  │      连接 CAN 网络进行连飞…                      │
+    │ [PC] 飞行员客户端 │ ┌ 正在下载 ▓▓▓▓▓▓░░░░ 45%      [暂停][取消] ┐   │
+    │      1.3.2 → 1.4.0│ 简介 / 信息 / 组件 / 更新日志                   │
+    │ [AC] 管制员客户端 │                                                  │
+    │ 数据           3  │                                                  │
+    │ …                 │                                                  │
+    │ 已安装 5 · 共 9 个│                                                  │
+    └───────────────────┴────────────────────────────────────────────────┘
+    软件库的分类与条目完全来自更新清单（ViewModels/Manifest.cs）。
+    不使用系统标题栏：拖动工具栏空白处移动窗口。
+  -->
+  <Panel>
+    <DockPanel>
+
+      <!-- ===== 工具栏（兼作拖动区域） ===== -->
+      <Border DockPanel.Dock="Top" Classes="toolbar" PointerPressed="OnToolbarPointerPressed">
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="{DynamicResource Space.Md}">
+          <WrapPanel ItemSpacing="{DynamicResource Space.Sm}" LineSpacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
+            <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding IsOnline}"
+                    ToolTip.Tip="重新获取更新清单：新上架的软件会自动出现在软件库中" />
+            <!-- 离线模式：登录后才能检查更新与下载 -->
+            <Button Classes="primary" Content="登录" Command="{Binding RequestLoginCommand}" IsVisible="{Binding IsOffline}" />
+            <Button Classes="primary" Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}"
+                    IsVisible="{Binding HasUpdates}" />
+            <Rectangle Classes="vsep" />
+            <Button Content="设置" Click="OnSettingsClick" />
+            <Button Classes="icon" Content="⋯" ToolTip.Tip="更多">
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                  <MenuItem Header="打开安装目录" Click="OnInstallFolderClick" />
+                  <MenuItem Header="打开下载缓存目录" Click="OnCacheFolderClick" />
+                  <Separator />
+                  <MenuItem Header="模拟服务器发布新版本（演示）" Command="{Binding SimulateReleaseCommand}" />
+                  <Separator />
+                  <MenuItem Header="关于" Click="OnAboutClick" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+          </WrapPanel>
+
+          <!-- 下载汇总 / 上次检查时间 -->
+          <TextBlock Grid.Column="1" Classes="transfer mono" Text="{Binding TransferSummary}" IsVisible="{Binding HasTransfers}" />
+          <TextBlock Grid.Column="1" Classes="caption" VerticalAlignment="Center" Text="{Binding LastCheckText}"
+                     IsVisible="{Binding !HasTransfers}" ToolTip.Tip="{Binding ManifestInfo}" />
+          <!-- 账号：版本号 + 账号菜单（退出登录） -->
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
+            <TextBlock Classes="caption mono" VerticalAlignment="Center" Text="{Binding AppVersion}" />
+            <Button Classes="ghost account" Content="{Binding AccountText}" IsVisible="{Binding IsOnline}">
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                  <MenuItem Header="账号信息" Click="OnAccountClick" />
+                  <Separator />
+                  <MenuItem Header="退出登录" Click="OnLogoutClick" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+
+          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
+            <Button Classes="ghost icon" Content="—" FontSize="10" ToolTip.Tip="最小化" Click="OnMinimizeClick" />
+            <Button Classes="ghost icon danger" Content="✕" ToolTip.Tip="退出" Click="OnExitClick" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- ===== 提示条 ===== -->
+      <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Notices}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:NoticeViewModel">
+            <Border Classes="notice" Classes.update="{Binding IsUpdate}" Classes.warning="{Binding IsWarning}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+                <Border Classes="noticeMark" />
+                <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button Grid.Column="2" Classes="small" Content="{Binding ActionText}" IsVisible="{Binding HasAction}"
+                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).InvokeNoticeCommand}"
+                        CommandParameter="{Binding}" />
+                <Button Grid.Column="3" Classes="ghost icon small" Content="✕" ToolTip.Tip="关闭"
+                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).DismissNoticeCommand}"
+                        CommandParameter="{Binding}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!-- ===== 左侧软件库：分类与条目由更新清单生成 ===== -->
+      <Border DockPanel.Dock="Left" Width="236" Classes="sidebar">
+        <DockPanel>
+          <TextBox DockPanel.Dock="Top" Margin="8,8,8,4" PlaceholderText="搜索软件" Text="{Binding SearchText}" />
+          <Border DockPanel.Dock="Bottom" Classes="libraryFooter">
+            <TextBlock Classes="caption" Text="{Binding LibrarySummary}" />
+          </Border>
+
+          <Panel>
+            <ListBox Classes="library" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <ListBox.Styles>
+                <!-- 分类标题不可点击、不高亮 -->
+                <Style Selector="ListBox.library > ListBoxItem" x:DataType="vm:LibraryEntry">
+                  <Setter Property="IsHitTestVisible" Value="{Binding IsSelectable}" />
+                  <Setter Property="Focusable" Value="{Binding IsSelectable}" />
+                </Style>
+              </ListBox.Styles>
+              <ListBox.DataTemplates>
+                <DataTemplate x:DataType="vm:CategoryHeaderEntry">
+                  <Grid ColumnDefinitions="*,Auto" Classes="categoryHeader">
+                    <TextBlock Classes="section" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" Classes="caption mono" Text="{Binding CountText}" />
+                  </Grid>
+                </DataTemplate>
+                <DataTemplate x:DataType="vm:ProductViewModel">
+                  <Grid RowDefinitions="*,Auto">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" Margin="0,6">
+                      <Border Classes="tile" Background="{Binding TileBackground}">
+                        <TextBlock Text="{Binding Icon}" Foreground="{Binding TileForeground}" />
+                      </Border>
+                      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                        <TextBlock Classes="productName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="productStatus" Classes.installed="{Binding IsInstalledState}"
+                                   Classes.update="{Binding IsUpdateState}" Classes.busy="{Binding IsBusy}"
+                                   Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <Border Grid.Column="2" Classes="tag accent" IsVisible="{Binding IsNew}">
+                        <TextBlock Text="新" />
+                      </Border>
+                    </Grid>
+                    <!-- 下载中：行底部细进度条 -->
+                    <ProgressBar Grid.Row="1" Classes="thin" Value="{Binding Progress}" Maximum="100"
+                                 Classes.paused="{Binding IsPaused}"
+                                 IsIndeterminate="{Binding IsInstallingState}" IsVisible="{Binding IsBusy}" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.DataTemplates>
+            </ListBox>
+
+            <TextBlock Classes="muted" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24"
+                       Text="没有匹配的软件" IsVisible="{Binding !HasEntries}" />
+          </Panel>
+        </DockPanel>
+      </Border>
+
+      <!-- ===== 当前软件 ===== -->
+      <Panel>
+        <views:ProductView DataContext="{Binding SelectedProduct}"
+                           IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SelectedProduct, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+        <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasProducts}">
+          <TextBlock Classes="muted" HorizontalAlignment="Center" Text="没有可用的软件清单" />
+          <Button Classes="primary" HorizontalAlignment="Center" Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}"
+                  IsVisible="{Binding IsOnline}" />
+          <Button Classes="primary" HorizontalAlignment="Center" Content="登录" Command="{Binding RequestLoginCommand}"
+                  IsVisible="{Binding IsOffline}" />
+        </StackPanel>
+      </Panel>
+    </DockPanel>
+
+    <!-- ===== 对话框遮罩层 ===== -->
+    <Panel x:Name="DialogLayer" Background="{DynamicResource Brush.Bg.Overlay}" IsVisible="False" />
+
+    <!-- ===== 窗口边缘缩放手柄 ===== -->
+    <views:ResizeGrips />
+  </Panel>
+</Window>

@@ -1,0 +1,14 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.Settings.GeneralPage"
+             x:DataType="vm:SettingsViewModel">
+  <!-- 常规：启动、托盘、通知 -->
+  <StackPanel Width="340" HorizontalAlignment="Left">
+    <CheckBox Content="开机时启动下载器" IsChecked="{Binding LaunchAtStartup}" />
+    <CheckBox Content="关闭窗口时最小化到系统托盘" IsChecked="{Binding MinimizeToTray}"
+              ToolTip.Tip="下载进行中时可以关闭窗口，下载在后台继续" />
+    <CheckBox Content="下载与安装完成时通知" IsChecked="{Binding NotifyWhenFinished}" />
+    <CheckBox Content="安装完成后打开软件" IsChecked="{Binding LaunchAfterInstall}" />
+  </StackPanel>
+</UserControl>

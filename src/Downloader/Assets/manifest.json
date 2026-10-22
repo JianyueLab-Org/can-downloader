@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "publishedAt": "2026-10-23T06:00:00Z",
+  "server": "update.can-network.example",
+
+  "launcher": {
+    "version": "1.2.0",
+    "releaseDate": "2026-10-22",
+    "size": 18874368,
+    "mandatory": false,
+    "notes": [
+      "软件列表改为完全由更新清单生成，新软件上架无需更新下载器",
+      "支持同时下载多个项目，可在设置中调整并发数与限速",
+      "安装前检查磁盘剩余空间",
+      "修复切换更新渠道后版本号显示错误的问题"
+    ]
+  },
+
+  "categories": [
+    { "id": "clients", "name": "客户端" },
+    { "id": "plugins", "name": "模拟器插件" },
+    { "id": "data", "name": "数据" },
+    { "id": "tools", "name": "工具" }
+  ],
+
+  "products": [
+    {
+      "id": "pilot-client",
+      "name": "飞行员客户端",
+      "category": "clients",
+      "icon": "PC",
+      "color": "#4C8BF5",
+      "summary": "连接 CAN 网络进行连飞，语音与文字通信",
+      "description": "CAN 飞行员客户端，布局参考 vPilot。支持语音与文字通信、应答机、飞行计划、模型匹配，可连接 MSFS、P3D 与 X-Plane。",
+      "version": "1.4.0",
+      "releaseDate": "2026-10-20",
+      "size": 29884416,
+      "executable": "PilotClient.exe",
+      "components": [
+        { "id": "core", "name": "主程序", "size": 22020096, "required": true },
+        { "id": "rules", "name": "模型匹配规则集", "size": 5242880, "default": true },
+        { "id": "sounds", "name": "提示音包", "size": 2621440, "default": true }
+      ],
+      "changelog": [
+        { "version": "1.4.0", "date": "2026-10-20", "changes": ["新增音频压缩设置：质量、每包音频长度、低延迟模式", "命令行支持 .chat 与 .msg", "修复 COM2 频率在窄窗口下被截断的问题"] },
+        { "version": "1.3.2", "date": "2026-09-28", "changes": ["修复与 X-Plane 12 断开后无法重连的问题"] },
+        { "version": "1.3.0", "date": "2026-09-01", "changes": ["新增航空器列表窗口", "设置页顺序与 vPilot 单机模式一致"] }
+      ]
+    },
+    {
+      "id": "controller-client",
+      "name": "管制员客户端",
+      "category": "clients",
+      "icon": "AC",
+      "color": "#3DBE84",
+      "summary": "管制员语音通信，频率交叉耦合与内话",
+      "description": "CAN 管制员语音客户端，排版参考 Audio For VATSIM（ATC 模式）。支持多频率收发、交叉耦合、内话面板与置顶小窗。",
+      "version": "2.0.1",
+      "releaseDate": "2026-10-15",
+      "size": 35651584,
+      "executable": "ControllerClient.exe",
+      "components": [
+        { "id": "core", "name": "主程序", "size": 31457280, "required": true },
+        { "id": "streamdeck", "name": "Stream Deck 插件", "size": 4194304, "default": false }
+      ],
+      "changelog": [
+        { "version": "2.0.1", "date": "2026-10-15", "changes": ["修复置顶小窗中频率面板无法展开的问题"] },
+        { "version": "2.0.0", "date": "2026-10-02", "changes": ["界面完全按 AFV 排版，更紧凑", "新增附加机场收发信机面板"] }
+      ]
+    },
+    {
+      "id": "atis-client",
+      "name": "通播客户端",
+      "category": "clients",
+      "icon": "AT",
+      "color": "#5BC0D8",
+      "summary": "生成并广播 ATIS 通播，支持语音录制",
+      "description": "CAN 通播客户端，基于 ATIS for CAN（vATIS）。根据 METAR 自动生成通播文本与语音稿，支持预设模板、缩写与语音包。",
+      "version": "0.9.0",
+      "releaseDate": "2026-10-21",
+      "size": 25165824,
+      "executable": "AtisClient.exe",
+      "components": [
+        { "id": "core", "name": "主程序", "size": 20971520, "required": true },
+        { "id": "profiles", "name": "示例配置文件（ZBAA / ZSPD / ZGGG）", "size": 4194304, "default": true }
+      ],
+      "changelog": [
+        { "version": "0.9.0", "date": "2026-10-21", "changes": ["首个公开测试版", "席位列表可放在左侧或顶部"] }
+      ]
+    },
+    {
+      "id": "msfs-plugin",
+      "name": "MSFS 连接插件",
+      "category": "plugins",
+      "icon": "MS",
+      "color": "#D9A441",
+      "summary": "Microsoft Flight Simulator 2020 / 2024 连接组件",
+      "description": "让飞行员客户端通过 SimConnect 与 MSFS 通信，同步本机位置与其他网络航空器。",
+      "version": "1.2.3",
+      "releaseDate": "2026-08-30",
+      "size": 8388608,
+      "requires": ["pilot-client"],
+      "components": [
+        { "id": "core", "name": "SimConnect 桥接", "size": 3145728, "required": true },
+        { "id": "community", "name": "Community 文件夹灯光修正包", "size": 5242880, "default": true }
+      ],
+      "changelog": [
+        { "version": "1.2.3", "date": "2026-08-30", "changes": ["适配 MSFS 2024 SU1"] }
+      ]
+    },
+    {
+      "id": "xplane-plugin",
+      "name": "X-Plane 连接插件",
+      "category": "plugins",
+      "icon": "XP",
+      "color": "#B08CE8",
+      "summary": "X-Plane 11 / 12 连接插件与 CSL 模型",
+      "description": "X-Plane 插件，负责与飞行员客户端通信并用 CSL 模型显示其他网络航空器。",
+      "version": "2.1.0",
+      "releaseDate": "2026-10-05",
+      "size": 412090368,
+      "requires": ["pilot-client"],
+      "components": [
+        { "id": "core", "name": "插件本体", "size": 6291456, "required": true },
+        { "id": "csl", "name": "CSL 机模库（Bluebell）", "size": 405798912, "default": true }
+      ],
+      "changelog": [
+        { "version": "2.1.0", "date": "2026-10-05", "changes": ["CSL 机模库增加国内航司涂装 36 套", "降低多机场景下的帧数开销"] }
+      ]
+    },
+    {
+      "id": "navdata",
+      "name": "导航数据",
+      "category": "data",
+      "icon": "ND",
+      "color": "#7CD49B",
+      "summary": "AIRAC 周期导航数据（航路点、程序、航路）",
+      "description": "客户端使用的导航数据库，每 28 天随 AIRAC 周期更新。版本号即 AIRAC 周期。",
+      "version": "2611",
+      "releaseDate": "2026-10-22",
+      "size": 62914560,
+      "components": [
+        { "id": "core", "name": "导航数据库", "size": 62914560, "required": true }
+      ],
+      "changelog": [
+        { "version": "2611", "date": "2026-10-22", "changes": ["AIRAC 2611，生效日期 2026-10-29"] },
+        { "version": "2610", "date": "2026-09-24", "changes": ["AIRAC 2610"] }
+      ]
+    },
+    {
+      "id": "sector-files",
+      "name": "管制扇区包",
+      "category": "data",
+      "icon": "SF",
+      "color": "#E5534B",
+      "summary": "国内各管制区扇区、频率与收发信机数据",
+      "description": "管制员客户端使用的扇区定义、席位频率与收发信机位置。",
+      "version": "2026.10",
+      "releaseDate": "2026-10-01",
+      "size": 15728640,
+      "requires": ["controller-client"],
+      "components": [
+        { "id": "core", "name": "扇区与席位数据", "size": 10485760, "required": true },
+        { "id": "transceivers", "name": "收发信机位置", "size": 5242880, "default": true }
+      ],
+      "changelog": [
+        { "version": "2026.10", "date": "2026-10-01", "changes": ["更新华东区域扇区划分", "新增 ZUTF 天府收发信机"] }
+      ]
+    },
+    {
+      "id": "atis-voices",
+      "name": "通播语音包",
+      "category": "data",
+      "icon": "VP",
+      "color": "#5BC0D8",
+      "summary": "通播客户端使用的中英文合成语音",
+      "description": "为通播客户端生成语音通播，包含中文与英文两种语音。",
+      "version": "1.0.0",
+      "releaseDate": "2026-10-21",
+      "size": 157286400,
+      "requires": ["atis-client"],
+      "components": [
+        { "id": "en", "name": "英文语音", "size": 83886080, "required": true },
+        { "id": "zh", "name": "中文语音", "size": 73400320, "default": true }
+      ],
+      "changelog": [
+        { "version": "1.0.0", "date": "2026-10-21", "changes": ["首个版本"] }
+      ]
+    },
+    {
+      "id": "net-diagnostics",
+      "name": "网络诊断工具",
+      "category": "tools",
+      "icon": "NT",
+      "color": "#8B9098",
+      "summary": "检测到 CAN 服务器与语音服务器的连接质量",
+      "description": "测试延迟、丢包与 UDP 连通性，生成可提交给技术支持的诊断报告。",
+      "version": "1.0.2",
+      "releaseDate": "2026-07-12",
+      "size": 4194304,
+      "executable": "NetDiag.exe",
+      "components": [
+        { "id": "core", "name": "主程序", "size": 4194304, "required": true }
+      ],
+      "changelog": [
+        { "version": "1.0.2", "date": "2026-07-12", "changes": ["增加语音服务器 UDP 测试"] }
+      ]
+    }
+  ]
+}

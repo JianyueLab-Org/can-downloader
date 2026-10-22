@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.Settings.DownloadPage"
+             x:DataType="vm:SettingsViewModel">
+  <!-- 下载：安装目录、缓存、并发数、限速、校验 -->
+  <StackPanel Width="340" HorizontalAlignment="Left">
+    <TextBlock Classes="label" Text="默认安装目录" />
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
+      <TextBox Classes="mono" Text="{Binding InstallRoot}" />
+      <Button Grid.Column="1" Content="浏览…" />
+    </Grid>
+    <TextBlock Classes="label" Text="下载缓存目录" />
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
+      <TextBox Classes="mono" Text="{Binding CacheFolder}" />
+      <Button Grid.Column="1" Content="浏览…" />
+    </Grid>
+
+    <Grid ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+      <TextBlock Classes="muted" VerticalAlignment="Center" Text="同时下载" />
+      <NumericUpDown Grid.Column="1" Width="96" Minimum="1" Maximum="5" Increment="1" FormatString="0"
+                     Value="{Binding MaxConcurrentDownloads}" />
+    </Grid>
+
+    <CheckBox Margin="0,10,0,0" Content="限制下载速度" IsChecked="{Binding LimitSpeed}" />
+    <Grid ColumnDefinitions="*,72" IsEnabled="{Binding LimitSpeed}">
+      <Slider Minimum="0.5" Maximum="50" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding SpeedLimit}" />
+      <TextBlock Grid.Column="1" Classes="mono" HorizontalAlignment="Right" VerticalAlignment="Center" Text="{Binding SpeedLimitText}" />
+    </Grid>
+
+    <CheckBox Margin="0,6,0,0" Content="下载完成后校验文件" IsChecked="{Binding VerifyAfterDownload}" />
+    <CheckBox Content="安装完成后删除安装包" IsChecked="{Binding DeleteCacheAfterInstall}" />
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Downloader.ViewModels"
+        xmlns:views="using:Downloader.Views"
+        x:Class="Downloader.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="设置"
+        Width="560" Height="400"
+        WindowDecorations="None"
+        BorderBrush="{DynamicResource Brush.Border.Control}"
+        BorderThickness="1"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+  <!--
+    下载器设置：左侧菜单 常规 / 下载 / 更新 / 网络，底部右对齐 确定 / 应用 / 取消。
+    打开时主窗口蒙上遮罩变暗，以区分当前操作的窗口。
+  -->
+  <DockPanel>
+    <views:TitleBar DockPanel.Dock="Top" Title="设置" />
+
+    <Border DockPanel.Dock="Bottom" Classes="footer">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="{DynamicResource Space.Sm}">
+        <Button Content="确定" Classes="primary" MinWidth="72" Click="OnOkClick" />
+        <Button Content="应用" MinWidth="72" IsEnabled="{Binding IsDirty}" Click="OnApplyClick" />
+        <Button Content="取消" MinWidth="72" IsCancel="True" Click="OnCancelClick" />
+      </StackPanel>
+    </Border>
+
+    <Grid ColumnDefinitions="130,*">
+      <Border Classes="sidebar" Padding="0,8">
+        <ListBox x:Name="Menu" SelectionChanged="OnMenuSelectionChanged">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="Theme" Value="{DynamicResource NavItemTheme}" />
+            </Style>
+          </ListBox.Styles>
+          <ListBoxItem Content="常规" Tag="General" />
+          <ListBoxItem Content="下载" Tag="Download" />
+          <ListBoxItem Content="更新" Tag="Update" />
+          <ListBoxItem Content="网络" Tag="Network" />
+        </ListBox>
+      </Border>
+
+      <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled">
+        <ContentControl x:Name="PanelHost" Margin="{DynamicResource Padding.Panel}" />
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</Window>

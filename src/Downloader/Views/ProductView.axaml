@@ -1,0 +1,165 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.ProductView"
+             x:DataType="vm:ProductViewModel">
+  <!--
+    当前软件详情：所有内容来自更新清单（名称、简介、版本、组件、更新日志）与本机安装记录。
+    ┌───────────────────────────────────────────────────────────┐
+    │ [PC] 飞行员客户端  [客户端]                      [更新][⋯] │
+    │      1.3.2 → 1.4.0 · 连接 CAN 网络进行连飞…               │
+    ├───────────────────────────────────────────────────────────┤
+    │ ┌ 更新 1.3.2 → 1.4.0                              45% ┐   │  进行中
+    │ │ ▓▓▓▓▓▓▓▓▓░░░░░░░░░░░                                 │   │
+    │ └ 12.3 MB / 27.1 MB · 8.4 MB/s · 剩余 2 秒   [暂停][取消]┘  │
+    │ 简介                                                      │
+    │ 信息                     │ 组件                           │
+    │ 更新日志                                                  │
+    └───────────────────────────────────────────────────────────┘
+  -->
+  <DockPanel>
+    <!-- ===== 标题 ===== -->
+    <Border DockPanel.Dock="Top" Classes="productHeader">
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+        <Border Classes="tile large" Background="{Binding TileBackground}">
+          <TextBlock Text="{Binding Icon}" Foreground="{Binding TileForeground}" />
+        </Border>
+
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Classes="productTitle" Text="{Binding Name}" />
+            <Border Classes="tag">
+              <TextBlock Text="{Binding CategoryName}" />
+            </Border>
+            <Border Classes="tag update" IsVisible="{Binding HasUpdate}">
+              <TextBlock Text="可更新" />
+            </Border>
+            <Border Classes="tag accent" IsVisible="{Binding IsNew}">
+              <TextBlock Text="新上架" />
+            </Border>
+            <Border Classes="tag" IsVisible="{Binding IsDelisted}">
+              <TextBlock Text="已下架" />
+            </Border>
+          </StackPanel>
+          <TextBlock Classes="muted" TextTrimming="CharacterEllipsis"><Run Classes="mono" Text="{Binding VersionText}" /><Run Text="  ·  " /><Run Text="{Binding Summary}" /></TextBlock>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
+          <!-- 进行中时由下方进度面板提供 暂停 / 继续 / 取消 -->
+          <Button Classes="action" Classes.primary="{Binding IsPrimaryAccent}" Content="{Binding PrimaryText}"
+                  IsEnabled="{Binding IsPrimaryEnabled}" IsVisible="{Binding !IsBusy}" Click="OnPrimaryClick" />
+          <Button Classes="icon action" Content="⋯" ToolTip.Tip="更多" IsVisible="{Binding HasMenu}">
+            <Button.Flyout>
+              <MenuFlyout Placement="BottomEdgeAlignedRight">
+                <MenuItem Header="打开安装目录" Click="OnOpenFolderClick" />
+                <MenuItem Header="校验并修复" Click="OnRepairClick" IsEnabled="{Binding CanDownload}" />
+                <Separator />
+                <MenuItem Header="卸载…" Click="OnUninstallClick" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="20,16,20,20" Spacing="18">
+
+        <!-- ===== 进行中：下载 / 暂停 / 安装 ===== -->
+        <Border Classes="transferPanel" IsVisible="{Binding IsBusy}">
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock FontWeight="SemiBold" Text="{Binding PhaseText}" />
+              <TextBlock Grid.Column="1" Classes="mono" IsVisible="{Binding IsTransferring}" Text="{Binding Progress, StringFormat={}{0:0}%}" />
+            </Grid>
+            <ProgressBar Value="{Binding Progress}" Maximum="100" Classes.paused="{Binding IsPaused}"
+                         IsIndeterminate="{Binding IsInstallingState}" />
+            <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource Size.Control}">
+              <TextBlock Classes="caption mono" VerticalAlignment="Center" Text="{Binding TransferText}" />
+              <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding StatusText}" IsVisible="{Binding IsInstallingState}" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="{DynamicResource Space.Sm}" IsVisible="{Binding CanCancel}">
+                <Button Content="{Binding PrimaryText}" MinWidth="64" Click="OnPrimaryClick" />
+                <Button Classes="danger" Content="取消" MinWidth="64" Click="OnCancelClick" />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <!-- ===== 简介 ===== -->
+        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" LineHeight="20" />
+
+        <!-- ===== 信息 / 组件 ===== -->
+        <Grid ColumnDefinitions="*,24,*">
+          <StackPanel>
+            <TextBlock Classes="section" Margin="0,0,0,8" Text="信息" />
+            <Grid Classes="facts" ColumnDefinitions="72,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Classes="muted" Text="已安装" />
+              <TextBlock Grid.Column="1" Classes="mono" Text="{Binding InstalledVersionText}" />
+              <TextBlock Grid.Row="1" Classes="muted" Text="最新版本" />
+              <TextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding LatestVersion}" />
+              <TextBlock Grid.Row="2" Classes="muted" Text="发布日期" />
+              <TextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding ReleaseDate}" />
+              <TextBlock Grid.Row="3" Classes="muted" Text="下载大小" />
+              <TextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding DownloadSizeText}" />
+              <TextBlock Grid.Row="4" Classes="muted" Text="安装位置" />
+              <TextBlock Grid.Row="4" Grid.Column="1" Classes="mono" Text="{Binding InstallPath}" TextWrapping="Wrap" />
+              <TextBlock Grid.Row="5" Classes="muted" Text="依赖" />
+              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding RequiresText}" TextWrapping="Wrap" />
+            </Grid>
+          </StackPanel>
+
+          <StackPanel Grid.Column="2">
+            <TextBlock Classes="section" Margin="0,0,0,8" Text="组件" />
+            <ItemsControl ItemsSource="{Binding Components}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ComponentViewModel">
+                  <Grid ColumnDefinitions="16,*,Auto,Auto" ColumnSpacing="6" Classes="componentRow">
+                    <Ellipse Classes="componentDot" Classes.on="{Binding IsSelected}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Classes="caption" Text="必需" IsVisible="{Binding IsRequired}" />
+                    <TextBlock Grid.Column="3" Classes="caption mono" MinWidth="56" TextAlignment="Right" Text="{Binding SizeText}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Grid>
+
+        <!-- ===== 更新日志 ===== -->
+        <StackPanel>
+          <TextBlock Classes="section" Margin="0,0,0,8" Text="更新日志" />
+          <ItemsControl ItemsSource="{Binding Changelog}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ChangelogViewModel">
+                <Border Classes="changelog" Classes.new="{Binding IsNew}">
+                  <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Classes="mono" FontWeight="SemiBold" Text="{Binding Version}" />
+                      <TextBlock Classes="caption mono" VerticalAlignment="Center" Text="{Binding Date}" />
+                      <Border Classes="tag update" IsVisible="{Binding IsNew}">
+                        <TextBlock Text="新" />
+                      </Border>
+                      <Border Classes="tag installed" IsVisible="{Binding IsCurrent}">
+                        <TextBlock Text="当前" />
+                      </Border>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Changes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <Grid ColumnDefinitions="14,*" Margin="0,1">
+                            <TextBlock Classes="muted" Text="·" />
+                            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding}" TextWrapping="Wrap" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

@@ -1,0 +1,291 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- 业务界面专用样式（启动窗口、提示条、软件库、软件详情、下载进度）。颜色均来自 Tokens.axaml。 -->
+
+  <!-- 面板容器：工具栏、侧栏、底部按钮栏 -->
+  <Style Selector="Border.toolbar">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Padding" Value="{DynamicResource Padding.Toolbar}" />
+  </Style>
+  <Style Selector="Border.sidebar">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+  </Style>
+  <Style Selector="Border.footer">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="Padding" Value="12,8" />
+  </Style>
+  <!-- 带边框的列表容器 -->
+  <Style Selector="Border.well">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Control}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Control}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Control}" />
+    <Setter Property="Padding" Value="3" />
+  </Style>
+
+  <!-- 小号按钮（提示条里的操作） -->
+  <Style Selector="Button.small">
+    <Setter Property="MinHeight" Value="{DynamicResource Size.Control.Small}" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Small}" />
+  </Style>
+  <Style Selector="Button.icon.small">
+    <Setter Property="Width" Value="{DynamicResource Size.Control.Small}" />
+    <Setter Property="Height" Value="{DynamicResource Size.Control.Small}" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+
+  <!-- 小标签（分类、可更新、新上架、当前版本） -->
+  <Style Selector="Border.tag">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Active}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Small}" />
+    <Setter Property="Padding" Value="5,1" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.tag > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Small}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Muted}" />
+  </Style>
+  <Style Selector="Border.tag.accent">
+    <Setter Property="Background" Value="{DynamicResource Brush.Accent.Subtle}" />
+  </Style>
+  <Style Selector="Border.tag.accent > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.Hover}" />
+  </Style>
+  <Style Selector="Border.tag.update > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.State.Update}" />
+  </Style>
+  <Style Selector="Border.tag.installed > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.State.Installed}" />
+  </Style>
+
+  <!-- 进度条：暂停时变灰；软件库行底部用细进度条 -->
+  <Style Selector="ProgressBar.paused">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Dim}" />
+  </Style>
+  <Style Selector="ProgressBar.thin">
+    <Setter Property="MinHeight" Value="2" />
+    <Setter Property="Height" Value="2" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Active}" />
+  </Style>
+
+  <!-- 软件图标块：清单提供的两个字母与颜色 -->
+  <Style Selector="Border.tile">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Overlay}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.tile > TextBlock">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="FontFamily" Value="{DynamicResource Font.Mono}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Base}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Border.tile.large">
+    <Setter Property="Width" Value="52" />
+    <Setter Property="Height" Value="52" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+  <Style Selector="Border.tile.large > TextBlock">
+    <Setter Property="FontSize" Value="18" />
+  </Style>
+
+  <!-- ========== 启动窗口 ========== -->
+  <Style Selector="Border.logo">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="{DynamicResource Brush.Accent}" />
+  </Style>
+  <Style Selector="Border.logo > TextBlock">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="FontFamily" Value="{DynamicResource Font.Mono}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Medium}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.OnAccent}" />
+  </Style>
+  <Style Selector="TextBlock.appName">
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Large}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Border.splashBody">
+    <Setter Property="Padding" Value="20,0,20,20" />
+  </Style>
+  <Style Selector="TextBlock.splashStatus">
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Medium}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.splashStatus.failed">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.State.Error}" />
+  </Style>
+  <Style Selector="TextBlock.versionArrow">
+    <Setter Property="FontFamily" Value="{DynamicResource Font.Mono}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Muted}" />
+  </Style>
+  <Style Selector="Run.dim">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Dim}" />
+  </Style>
+  <Style Selector="Run.new">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.Hover}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <!-- 更新说明 -->
+  <Style Selector="Border.notes">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Control}" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+
+  <!-- ========== 登录窗口 ========== -->
+  <Style Selector="Border.notice.loginNotice">
+    <Setter Property="BorderThickness" Value="0,1" />
+  </Style>
+  <Style Selector="Button.loginButton">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="MinHeight" Value="30" />
+  </Style>
+
+  <!-- ========== 主窗口工具栏 ========== -->
+  <!-- 账号按钮 -->
+  <Style Selector="Button.account">
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Muted}" />
+  </Style>
+  <!-- 下载汇总（速度、项目数） -->
+  <Style Selector="TextBlock.transfer">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Small}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Speed}" />
+  </Style>
+
+  <!-- ========== 提示条 ========== -->
+  <Style Selector="Border.notice">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Padding" Value="0,5,8,5" />
+  </Style>
+  <!-- 左侧色条：信息为强调色，可更新为警示色，离线 / 失败为危险色 -->
+  <Style Selector="Border.noticeMark">
+    <Setter Property="Width" Value="3" />
+    <Setter Property="Margin" Value="0,-5,0,-5" />
+    <Setter Property="Background" Value="{DynamicResource Brush.Accent}" />
+  </Style>
+  <Style Selector="Border.notice.update Border.noticeMark">
+    <Setter Property="Background" Value="{DynamicResource Brush.State.Update}" />
+  </Style>
+  <Style Selector="Border.notice.warning Border.noticeMark">
+    <Setter Property="Background" Value="{DynamicResource Brush.State.Error}" />
+  </Style>
+
+  <!-- ========== 软件库 ========== -->
+  <Style Selector="ListBox.library">
+    <Setter Property="Padding" Value="4,0,4,8" />
+  </Style>
+  <Style Selector="ListBox.library > ListBoxItem">
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="ListBox.library > ListBoxItem:selected">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Active}" />
+  </Style>
+  <Style Selector="Grid.categoryHeader">
+    <Setter Property="Margin" Value="0,12,0,2" />
+  </Style>
+  <Style Selector="TextBlock.productName">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.productStatus">
+    <Setter Property="FontSize" Value="{DynamicResource FontSize.Small}" />
+    <Setter Property="FontFamily" Value="{DynamicResource Font.Mono}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Dim}" />
+  </Style>
+  <Style Selector="TextBlock.productStatus.installed">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Muted}" />
+  </Style>
+  <Style Selector="TextBlock.productStatus.update">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.State.Update}" />
+  </Style>
+  <Style Selector="TextBlock.productStatus.busy">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.Hover}" />
+  </Style>
+  <Style Selector="Border.libraryFooter">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="Padding" Value="12,7" />
+  </Style>
+
+  <!-- ========== 软件详情 ========== -->
+  <Style Selector="Border.productHeader">
+    <Setter Property="Padding" Value="20,16" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="TextBlock.productTitle">
+    <Setter Property="FontSize" Value="18" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <!-- 详情页主按钮略高 -->
+  <Style Selector="Button.action">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="MinWidth" Value="30" />
+  </Style>
+  <Style Selector="Button.action:not(.icon)">
+    <Setter Property="MinWidth" Value="88" />
+  </Style>
+
+  <!-- 下载进度面板 -->
+  <Style Selector="Border.transferPanel">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Control}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Overlay}" />
+    <Setter Property="Padding" Value="14,12,14,8" />
+  </Style>
+
+  <!-- 信息表 -->
+  <Style Selector="Grid.facts > TextBlock">
+    <Setter Property="Margin" Value="0,0,0,7" />
+  </Style>
+
+  <!-- 组件：圆点表示已选（安装） -->
+  <Style Selector="Grid.componentRow">
+    <Setter Property="MinHeight" Value="22" />
+  </Style>
+  <Style Selector="Grid.componentRow > TextBlock">
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Ellipse.componentDot">
+    <Setter Property="Width" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource Brush.Border.Hover}" />
+  </Style>
+  <Style Selector="Ellipse.componentDot.on">
+    <Setter Property="Fill" Value="{DynamicResource Brush.State.Installed}" />
+  </Style>
+
+  <!-- 更新日志：比已安装版本新的条目左侧加警示色细线 -->
+  <Style Selector="Border.changelog">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Control}" />
+    <Setter Property="BorderThickness" Value="2,0,0,0" />
+    <Setter Property="Padding" Value="12,2,0,2" />
+    <Setter Property="Margin" Value="0,0,0,12" />
+  </Style>
+  <Style Selector="Border.changelog.new">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.State.Update}" />
+  </Style>
+</Styles>
