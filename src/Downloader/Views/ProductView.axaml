@@ -127,7 +127,11 @@
 
         <!-- ===== 更新日志 ===== -->
         <StackPanel>
-          <TextBlock Classes="section" Margin="0,0,0,8" Text="更新日志" />
+          <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+            <TextBlock Classes="section" VerticalAlignment="Center" Text="更新日志" />
+            <Button Grid.Column="1" Classes="ghost small" Content="查看完整更新说明" IsVisible="{Binding HasNotesUrl}"
+                    ToolTip.Tip="{Binding NotesUrl}" Click="OnNotesClick" />
+          </Grid>
           <ItemsControl ItemsSource="{Binding Changelog}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:ChangelogViewModel">

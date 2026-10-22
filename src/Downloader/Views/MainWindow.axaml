@@ -27,7 +27,7 @@
     │ …                 │                                                  │
     │ 已安装 5 · 共 9 个│                                                  │
     └───────────────────┴────────────────────────────────────────────────┘
-    软件库的分类与条目完全来自更新清单（ViewModels/Manifest.cs）。
+    软件库的条目来自 CAN API 的发布信息，分类与简介来自 catalog.json（ViewModels/Manifest.cs）。
     不使用系统标题栏：拖动工具栏空白处移动窗口。
   -->
   <Panel>
@@ -38,7 +38,7 @@
         <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="{DynamicResource Space.Md}">
           <WrapPanel ItemSpacing="{DynamicResource Space.Sm}" LineSpacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
             <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding IsOnline}"
-                    ToolTip.Tip="重新获取更新清单：新上架的软件会自动出现在软件库中" />
+                    ToolTip.Tip="重新从 api.ceruleanavi.net 获取发布信息：新上架的软件会自动出现在软件库中" />
             <!-- 离线模式：登录后才能检查更新与下载 -->
             <Button Classes="primary" Content="登录" Command="{Binding RequestLoginCommand}" IsVisible="{Binding IsOffline}" />
             <Button Classes="primary" Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}"
@@ -50,8 +50,8 @@
                 <MenuFlyout Placement="BottomEdgeAlignedLeft">
                   <MenuItem Header="打开安装目录" Click="OnInstallFolderClick" />
                   <MenuItem Header="打开下载缓存目录" Click="OnCacheFolderClick" />
-                  <Separator />
-                  <MenuItem Header="模拟服务器发布新版本（演示）" Command="{Binding SimulateReleaseCommand}" />
+                  <MenuItem Header="打开日志目录" Click="OnLogFolderClick" />
+                  <MenuItem Header="打开 CAN 网站" Click="OnWebsiteClick" />
                   <Separator />
                   <MenuItem Header="关于" Click="OnAboutClick" />
                 </MenuFlyout>

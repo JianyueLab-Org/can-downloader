@@ -1,0 +1,53 @@
+{
+  // 软件库的显示信息：分类、名称、图标、简介。软件本身由 GET /api/v1/clients/latest 决定——
+  // API 新增的客户端即使这里没有条目也会出现（归入“其他”，显示 API 里的名称）。
+  // 文字取自 https://ceruleanavi.net/downloads。
+
+  "categories": [
+    { "id": "atc", "name": "管制端软件" },
+    { "id": "pilot", "name": "飞行端软件" }
+  ],
+
+  "products": [
+    {
+      "id": "audio-for-can",
+      "name": "Audio for CAN",
+      "category": "atc",
+      "icon": "AU",
+      "color": "#3DBE84",
+      "summary": "管制员语音客户端",
+      "description": "管制员语音客户端。一栈频率，每个频率带 RX / TX / XC。管制席位必需，需配合 EuroScope 使用。",
+      "executable": "audio-for-can.exe"
+    },
+    {
+      "id": "atis-for-can",
+      "name": "ATIS for CAN",
+      "category": "atc",
+      "icon": "AT",
+      "color": "#5BC0D8",
+      "summary": "情报通播（ATIS）客户端",
+      "description": "情报通播（ATIS）客户端。自动获取天气，中英双语播出。",
+      "executable": "atis-for-can.exe"
+    },
+    {
+      "id": "msfs-for-can",
+      "name": "MSFS for CAN",
+      "category": "pilot",
+      "icon": "MS",
+      "color": "#D9A441",
+      "summary": "MSFS 飞行员客户端",
+      "description": "Microsoft Flight Simulator 飞行员客户端。语音 + FSD 连线。",
+      "executable": "msfs-for-can.exe"
+    },
+    {
+      "id": "xpc-for-can",
+      "name": "XPC for CAN",
+      "category": "pilot",
+      "icon": "XP",
+      "color": "#B08CE8",
+      "summary": "X-Plane 飞行员客户端",
+      "description": "X-Plane 飞行员客户端。语音 + FSD 连线，支持他机渲染。安装目录里的「X-Plane plugin」文件夹是 X-Plane 插件，需要放进 X-Plane 的 Resources/plugins 目录。",
+      "executable": "xpc-for-can.exe"
+    }
+  ]
+}

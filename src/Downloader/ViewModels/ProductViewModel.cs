@@ -63,6 +63,16 @@ public sealed partial class ProductViewModel : LibraryEntry
     private string? _executable;
     [ObservableProperty] private string _requiresText = "";
 
+    /// <summary>下载地址：本站中转与 GitHub 原始地址，按设置里的下载源选择。</summary>
+    public string? DownloadUrl { get; private set; }
+    public string? OriginUrl { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNotesUrl))]
+    private string? _notesUrl;
+
+    public bool HasNotesUrl => NotesUrl is not null;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpdate), nameof(StatusText), nameof(VersionText))]
     private string _latestVersion = "";
@@ -100,7 +110,7 @@ public sealed partial class ProductViewModel : LibraryEntry
     [NotifyPropertyChangedFor(nameof(CanDownload))]
     private bool _isOffline;
 
-    public bool CanDownload => !IsOffline && !IsDelisted;
+    public bool CanDownload => !IsOffline && !IsDelisted && DownloadUrl is not null;
 
     // —— 状态 ——
     [ObservableProperty]
@@ -203,6 +213,11 @@ public sealed partial class ProductViewModel : LibraryEntry
         LatestVersion = product.Version;
         ReleaseDate = product.ReleaseDate;
         Executable = product.Executable;
+        DownloadUrl = product.DownloadUrl;
+        OriginUrl = product.OriginUrl;
+        NotesUrl = product.NotesUrl;
+        OnPropertyChanged(nameof(CanDownload));
+        OnPropertyChanged(nameof(IsPrimaryEnabled));
         Requires = product.Requires;
         RequiresText = product.Requires.Count == 0
             ? "无"

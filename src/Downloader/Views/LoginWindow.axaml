@@ -17,14 +17,14 @@
     │ [CAN] CAN 下载器                       ✕ │
     │       版本 1.1.0                          │
     ├──────────────────────────────────────────┤
-    │▌CAN 下载器 1.2.0 已发布        [立即更新] │  启动时选了“稍后”才显示
+    │▌CAN 下载器 1.2.0 已发布        [立即更新] │  有新版本时才显示
     ├──────────────────────────────────────────┤
-    │ CAN ID   [1234567                     ]   │
-    │ 密码     [••••••                      ]   │
-    │ [✓] 记住账号  [ ] 自动登录                │
+    │ CAN ID 或邮箱 [1234567                 ]  │
+    │ 密码          [••••••                  ]  │  验证码登录时：[验证码][发送验证码]
+    │ [✓] 记住账号 [ ] 自动登录  改用邮箱验证码登录 │
     │ [               登录                  ]   │
     ├──────────────────────────────────────────┤
-    │ 注册账号  忘记密码              [离线模式] │
+    │ 注册账号  忘记密码              [离线模式] │  注册 / 忘记密码在浏览器中打开 ceruleanavi.net
     └──────────────────────────────────────────┘
     拖动任意空白处移动窗口。
   -->
@@ -54,15 +54,30 @@
 
       <!-- ===== 账号 ===== -->
       <StackPanel Margin="20,14,20,20" IsEnabled="{Binding IsIdle}">
-        <TextBlock Classes="label" Text="CAN ID" />
-        <TextBox x:Name="CanIdBox" Classes="mono" Text="{Binding CanId}" PlaceholderText="数字账号" MaxLength="10" />
-        <TextBlock Classes="label" Text="密码" />
-        <TextBox x:Name="PasswordBox" Classes="mono" Text="{Binding Password}" PasswordChar="•" PlaceholderText="CAN 网络密码" />
+        <TextBlock Classes="label" Text="CAN ID 或邮箱" />
+        <TextBox x:Name="CanIdBox" Classes="mono" Text="{Binding CanId}" PlaceholderText="CAN ID 或注册邮箱" />
 
-        <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
-          <CheckBox Content="记住账号" IsChecked="{Binding RememberAccount}" />
-          <CheckBox Content="自动登录" IsChecked="{Binding AutoLogin}" ToolTip.Tip="下次启动检查完更新后自动登录" />
+        <!-- 密码登录 -->
+        <StackPanel IsVisible="{Binding IsPasswordMode}">
+          <TextBlock Classes="label" Text="密码" />
+          <TextBox x:Name="PasswordBox" Classes="mono" Text="{Binding Password}" PasswordChar="•" PlaceholderText="CAN 账号密码" />
         </StackPanel>
+
+        <!-- 邮箱验证码登录 -->
+        <StackPanel IsVisible="{Binding IsCodeMode}">
+          <TextBlock Classes="label" Text="邮箱验证码" />
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
+            <TextBox x:Name="CodeBox" Classes="mono" Text="{Binding Code}" PlaceholderText="邮件中的 6 位验证码" MaxLength="6" />
+            <Button Grid.Column="1" MinWidth="96" Content="{Binding SendCodeText}" Command="{Binding SendCodeCommand}" />
+          </Grid>
+          <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding CodeHintText}" IsVisible="{Binding HasCodeHint}" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="16" Margin="0,8,0,0">
+          <CheckBox Content="记住账号" IsChecked="{Binding RememberAccount}" />
+          <CheckBox Grid.Column="1" Content="自动登录" IsChecked="{Binding AutoLogin}" ToolTip.Tip="下次启动检查完更新后自动登录（会话保存在本机）" />
+          <Button Grid.Column="3" Classes="ghost small" Content="{Binding SwitchModeText}" Command="{Binding SwitchModeCommand}" />
+        </Grid>
 
         <TextBlock Classes="caption" Margin="0,6,0,0" Foreground="{DynamicResource Brush.State.Error}"
                    TextWrapping="Wrap" Text="{Binding ErrorText}" IsVisible="{Binding HasError}" />
@@ -74,8 +89,8 @@
       <!-- ===== 底部 ===== -->
       <Border Classes="footer">
         <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="2">
-          <Button Classes="ghost small" Content="注册账号" ToolTip.Tip="界面原型：将在浏览器中打开 CAN 账号注册页" />
-          <Button Grid.Column="1" Classes="ghost small" Content="忘记密码" ToolTip.Tip="界面原型：将在浏览器中打开密码重置页" />
+          <Button Classes="ghost small" Content="注册账号" Command="{Binding OpenSignUpCommand}" ToolTip.Tip="在浏览器中打开 CAN 账号注册页" />
+          <Button Grid.Column="1" Classes="ghost small" Content="忘记密码" Command="{Binding OpenResetPasswordCommand}" ToolTip.Tip="在浏览器中打开密码重置页" />
           <Button Grid.Column="3" Content="离线模式" Command="{Binding ContinueOfflineCommand}"
                   ToolTip.Tip="不登录进入：只显示上次缓存的软件列表，不能下载或更新" />
         </Grid>

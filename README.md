@@ -1,8 +1,17 @@
-# CAN 下载器（界面原型）
+# CAN 下载器
 
-基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 飞行员客户端、管制员客户端、通播客户端以及模拟器插件、导航数据等。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，可在 Windows / macOS / Linux 上运行。
+基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，可在 Windows / macOS / Linux 上运行（目前发布的客户端都是 Windows 版）。
 
-> 当前是**界面原型**：更新服务器、登录、下载与安装均为模拟，尚未接入真实服务。
+已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载。下载器自身的更新 API 还没有提供，启动时总是“已是最新版本”。
+
+| 功能 | API |
+|---|---|
+| 密码登录（CAN ID 或邮箱） | `POST /api/v1/auth/signin` |
+| 邮箱验证码登录 | `POST /api/v1/auth/code/request`、`/api/v1/auth/code/verify` |
+| 自动登录时校验会话 / 退出登录 | `GET /api/v1/auth/session`、`POST /api/v1/auth/signout` |
+| 软件列表与版本 | `GET /api/v1/clients/latest` |
+| 下载（下载源“本站”） | `GET /api/v1/clients/download/{client}`，支持 Range 续传 |
+| 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址 |
 
 ## 流程
 
@@ -11,22 +20,40 @@
 | 界面 | 说明 |
 |---|---|
 | 启动窗口 | 打开后先检查下载器自身更新：已是最新则直接进入登录；有新版本时显示更新说明，可“立即更新”（下载 → 安装 → 重启）或“稍后”（必需更新不能跳过）；连接失败可重试或离线模式进入 |
-| 登录窗口 | CAN ID、密码、记住账号、自动登录；登录后才能进入主界面下载。启动时跳过了更新的话，登录前仍可“立即更新”下载器；也可选“离线模式”，不登录进入，只能查看缓存的软件列表 |
+| 登录窗口 | CAN ID 或邮箱 + 密码，或邮箱验证码；记住账号、自动登录（会话保存在本机，Windows 上用 DPAPI 加密）；注册账号、忘记密码在浏览器中打开 ceruleanavi.net。登录后才能进入主界面下载；也可选“离线模式”，不登录进入，只能查看上次缓存的软件列表 |
 | 主窗口 | 工具栏（检查更新、全部更新、设置；离线时为“登录”）、下载速度汇总、账号菜单（账号信息、退出登录）；提示条报告新上架的软件、可更新的软件、下载器新版本、离线模式 |
-| 软件库 | 左侧按分类分组、可搜索；**分类与软件全部来自更新清单**，服务器新增条目后点“检查更新”即自动出现，清单中移除的已安装软件标记“已下架” |
-| 软件详情 | 安装 / 更新 / 打开，下载进度（暂停、继续、取消），简介、版本信息、组件、依赖、更新日志（比已安装版本新的条目高亮）；⋯ 菜单：打开目录、校验并修复、卸载 |
-| 安装 | 安装位置、可选组件、同时安装依赖项、所需与可用空间 |
-| 设置 | 常规、下载（安装目录、缓存、同时下载数、限速、校验）、更新（渠道、服务器、检查频率、自动更新）、网络（代理、超时） |
+| 软件库 | 左侧按分类分组、可搜索；**软件来自 API 的发布信息**，API 新增客户端后点“检查更新”即自动出现，移除的已安装软件标记“已下架” |
+| 软件详情 | 安装 / 更新 / 打开，下载进度（暂停、继续、取消；暂停后续传），简介、版本信息、更新说明链接；⋯ 菜单：打开目录、校验并修复（重新下载覆盖安装）、卸载 |
+| 安装 | 安装位置（可浏览选择；设置里关闭“安装时询问安装位置”后不显示，直接装到默认目录）、可选组件、同时安装依赖项、所需与可用空间 |
+| 设置 | 常规、下载（默认安装目录、是否询问安装位置、缓存、同时下载数、限速、校验）、更新（渠道、**下载源：本站 / GitHub**、检查频率、自动更新）、网络（代理、超时）。保存在 `data/settings.json` |
 
-## 更新清单
+## 软件清单
 
-清单格式见 `src/Downloader/ViewModels/Manifest.cs`，演示数据在 `src/Downloader/Assets/manifest.json`，运行时读取输出目录下的 `manifest.json`：
+清单由 `GET /api/v1/clients/latest` 生成（`src/Downloader/ViewModels/Manifest.cs`），显示信息来自 `src/Downloader/Assets/catalog.json`（复制到输出目录根）：
 
-- `launcher`：下载器最新版本、大小、是否必需更新、更新说明
 - `categories`：软件库分类（顺序即显示顺序）
-- `products`：软件（名称、图标字母与颜色、简介、版本、大小、组件、依赖 `requires`、更新日志）
+- `products`：按 API 的客户端名称（如 `audio-for-can`）提供名称、分类、图标字母与颜色、简介、可执行文件
 
-在运行中修改输出目录里的 `manifest.json` 再点“检查更新”，即可看到新增的软件与新版本。主窗口 ⋯ 菜单里的“模拟服务器发布新版本（演示）”也能演示这一点。
+API 里有、catalog.json 里没有的客户端也会出现，归入“其他”。
+
+## 目录（便携）
+
+所有目录默认都在下载器 exe 所在的目录下，整个目录复制走即可带走：
+
+| 目录 | 内容 |
+|---|---|
+| `apps/<客户端名>` | 默认安装位置（设置里可改，相对路径按 exe 目录计算） |
+| `downloads/` | 安装包缓存；下载先写 `.part`，暂停或网络中断后用 Range 续传 |
+| `data/` | `settings.json` 设置、`installs.json` 安装记录、`account.json` 记住的账号与自动登录会话、`manifest-cache.json` 离线模式用的软件列表 |
+| `logs/` | 日志，每天一个文件（`2026-10-23.log`）；记录启动、每个 API 请求、登录结果、下载 / 安装 / 卸载、错误。不记录密码、验证码和会话内容 |
+
+不要把下载器放在 `Program Files` 这类需要管理员权限才能写入的目录。
+
+## 安装过程
+
+- 校验：完整读取 zip 中的每个文件
+- 解压到安装目录，去掉 zip 里与软件同名的顶层目录；更新时删除旧版本多出来的文件
+- 卸载只删除安装记录里的文件，用户自己放进去的文件保留
 
 ## 运行
 
@@ -34,10 +61,16 @@
 
 ```bash
 dotnet run --project src/Downloader
-dotnet run --project src/Downloader -- --offline   # 演示无法连接更新服务器
+dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
 ```
 
-界面原型中任意数字 CAN ID 与非空密码都能登录。
+## 发布
+
+```bash
+dotnet publish src/Downloader -p:PublishProfile=win-x64
+```
+
+输出 `publish/win-x64/Downloader.exe` 一个文件（约 49 MB）：自包含，不需要安装 .NET；Avalonia 的原生库也打包在内，首次运行时解压到临时目录。`catalog.json` 嵌入在 exe 里，exe 旁边放一个 `catalog.json` 会优先使用。
 
 ## 技术栈
 
@@ -50,14 +83,15 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接更新服
 ```
 src/Downloader/
 ├── App.axaml(.cs)          # 主题装配；启动窗口 → 登录 → 主界面 的窗口切换
-├── Assets/manifest.json    # 演示用的更新清单
+├── Assets/catalog.json     # 软件库的分类与显示信息
+├── Services/               # CAN API 客户端、下载与安装、本机数据
 ├── Styles/
 │   ├── Theme/
 │   │   ├── Tokens.axaml        # 设计令牌：颜色、字体、尺寸、圆角
 │   │   ├── ControlThemes.axaml # 按钮、标签页、列表项、导航项等控件主题
 │   │   └── Controls.axaml      # 其余控件的尺寸与状态样式、通用文字样式
 │   └── App.axaml           # 业务样式：启动窗口、提示条、软件库、下载进度
-├── ViewModels/             # 清单模型、自更新与登录流程、软件状态与模拟下载队列
+├── ViewModels/             # 清单、自更新与登录流程、软件状态与下载队列
 └── Views/                  # 启动窗口、登录窗口、主窗口、软件详情、安装对话框、设置
 ```
 
@@ -69,7 +103,9 @@ src/Downloader/
 
 ## 状态
 
-- [x] 自更新、登录 / 离线模式、按清单生成软件库、下载队列的界面与交互演示
-- [ ] 接入真实更新服务器与 CAN 账号登录
-- [ ] 真实下载、校验与安装
-- [ ] 设置持久化
+- [x] 自更新、登录 / 离线模式、按清单生成软件库、下载队列的界面
+- [x] CAN 账号登录（密码 / 邮箱验证码、自动登录）
+- [x] 从 API 获取软件列表；真实下载（续传、限速、并发、本站 / GitHub 下载源）、校验与安装
+- [ ] 下载器自身的更新（等 API 提供发布信息）
+- [ ] can-voice 新一代客户端（`/api/v1/voice/*`，目前还没有发布可安装的构建）
+- [x] 设置保存、便携目录、按日期分文件的日志、单文件发布

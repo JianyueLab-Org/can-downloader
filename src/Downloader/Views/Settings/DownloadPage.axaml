@@ -3,17 +3,21 @@
              xmlns:vm="using:Downloader.ViewModels"
              x:Class="Downloader.Views.Settings.DownloadPage"
              x:DataType="vm:SettingsViewModel">
-  <!-- 下载：安装目录、缓存、并发数、限速、校验 -->
+  <!-- 下载：安装目录（安装时是否询问位置）、缓存、并发数、限速、校验。目录默认在程序目录下 -->
   <StackPanel Width="340" HorizontalAlignment="Left">
     <TextBlock Classes="label" Text="默认安装目录" />
     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
       <TextBox Classes="mono" Text="{Binding InstallRoot}" />
-      <Button Grid.Column="1" Content="浏览…" />
+      <Button Grid.Column="1" Content="浏览…" Click="OnBrowseInstallRootClick" />
     </Grid>
+    <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"
+               Text="每个软件装在其中以软件名命名的子目录。相对路径按下载器所在目录计算。" />
+    <CheckBox Margin="0,6,0,0" Content="安装时询问安装位置" IsChecked="{Binding AskInstallLocation}"
+              ToolTip.Tip="关闭后安装对话框不再显示安装位置，直接装到默认安装目录" />
     <TextBlock Classes="label" Text="下载缓存目录" />
     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
       <TextBox Classes="mono" Text="{Binding CacheFolder}" />
-      <Button Grid.Column="1" Content="浏览…" />
+      <Button Grid.Column="1" Content="浏览…" Click="OnBrowseCacheFolderClick" />
     </Grid>
 
     <Grid ColumnDefinitions="*,Auto" Margin="0,14,0,0">

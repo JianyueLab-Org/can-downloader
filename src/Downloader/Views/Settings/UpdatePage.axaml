@@ -3,15 +3,17 @@
              xmlns:vm="using:Downloader.ViewModels"
              x:Class="Downloader.Views.Settings.UpdatePage"
              x:DataType="vm:SettingsViewModel">
-  <!-- 更新：渠道、服务器、检查频率、自动更新 -->
+  <!-- 更新：渠道、下载源、检查频率、自动更新 -->
   <StackPanel Width="340" HorizontalAlignment="Left">
     <TextBlock Classes="label" Text="更新渠道" />
     <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding Channel}" HorizontalAlignment="Stretch" />
     <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"
                Text="测试版与开发版会更早收到新功能，也可能不稳定。下载器与已安装的软件使用同一渠道。" />
 
-    <TextBlock Classes="label" Text="更新服务器" />
-    <ComboBox ItemsSource="{Binding Servers}" SelectedItem="{Binding Server}" HorizontalAlignment="Stretch" />
+    <TextBlock Classes="label" Text="下载源" />
+    <ComboBox ItemsSource="{Binding DownloadSources}" SelectedItem="{Binding DownloadSource}" HorizontalAlignment="Stretch" />
+    <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"
+               Text="本站经 api.ceruleanavi.net 中转，国内下载更稳定；GitHub 直接从 GitHub Releases 下载。版本信息始终从本站获取。" />
 
     <TextBlock Classes="label" Text="自动检查更新" />
     <ComboBox ItemsSource="{Binding CheckIntervals}" SelectedItem="{Binding CheckInterval}" HorizontalAlignment="Stretch" />

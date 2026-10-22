@@ -4,7 +4,7 @@
              x:Class="Downloader.Views.InstallView"
              x:DataType="vm:InstallViewModel"
              Width="400">
-  <!-- 安装对话框：版本、安装位置、组件（来自清单）、依赖项、磁盘空间 -->
+  <!-- 安装对话框：版本、安装位置（设置里可关闭）、组件（来自清单）、依赖项、磁盘空间 -->
   <StackPanel>
     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
       <Border Classes="tile" Background="{Binding Product.TileBackground}">
@@ -16,11 +16,13 @@
       </StackPanel>
     </Grid>
 
-    <TextBlock Classes="label" Margin="0,14,0,4" Text="安装位置" />
-    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
-      <TextBox Classes="mono" Text="{Binding InstallPath}" />
-      <Button Grid.Column="1" Content="浏览…" />
-    </Grid>
+    <StackPanel IsVisible="{Binding ShowLocation}">
+      <TextBlock Classes="label" Margin="0,14,0,4" Text="安装位置" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Sm}">
+        <TextBox Classes="mono" Text="{Binding InstallPath}" />
+        <Button Grid.Column="1" Content="浏览…" Click="OnBrowseClick" />
+      </Grid>
+    </StackPanel>
 
     <TextBlock Classes="label" Text="组件" />
     <Border Classes="well">
@@ -36,10 +38,8 @@
       </ItemsControl>
     </Border>
 
-    <CheckBox Margin="0,8,0,0" Content="创建桌面快捷方式" IsChecked="{Binding CreateShortcut}" />
-
     <!-- 依赖：清单 requires 中尚未安装的软件 -->
-    <StackPanel IsVisible="{Binding HasDependencies}">
+    <StackPanel Margin="0,8,0,0" IsVisible="{Binding HasDependencies}">
       <CheckBox Content="同时安装依赖项" IsChecked="{Binding InstallDependencies}" />
       <TextBlock Classes="caption" Margin="24,0,0,0" Foreground="{DynamicResource Brush.State.Update}"
                  TextWrapping="Wrap" Text="{Binding DependencyText}" />

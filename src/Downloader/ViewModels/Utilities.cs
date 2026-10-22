@@ -1,6 +1,6 @@
 namespace Downloader.ViewModels;
 
-/// <summary>下载器自身信息。界面原型：自更新完成后直接改写版本号，模拟重启后的新版本。</summary>
+/// <summary>下载器自身信息。自更新目前是模拟的：完成后直接改写版本号，模拟重启后的新版本。</summary>
 public static class AppInfo
 {
     public const string Name = "CAN 下载器";

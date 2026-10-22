@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Downloader.Services;
 
 namespace Downloader.ViewModels;
 
@@ -19,8 +20,10 @@ public enum SelfUpdateStage
 }
 
 /// <summary>
-/// 启动窗口：打开下载器时先检查下载器自身的更新，完成（或跳过）后进入登录窗口；无法连接时可离线模式进入主界面。
-/// 界面原型：网络请求与下载都是模拟的，清单读取自 <see cref="ManifestSource"/>。
+/// 启动窗口：打开下载器时连接 CAN API 获取软件清单并检查下载器自身的更新，完成（或跳过）后进入登录窗口；
+/// 无法连接时可离线模式进入主界面。
+/// 注意：API 目前没有下载器自身的发布信息（<see cref="UpdateManifest.Launcher"/> 为 null），所以总是“已是最新版本”；
+/// 下面的下载、安装流程仍是模拟的，等 API 提供下载器的发布信息后再接入。
 /// </summary>
 public sealed partial class SelfUpdateViewModel : ViewModelBase
 {
@@ -72,38 +75,34 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         Stage = SelfUpdateStage.Checking;
         IsIndeterminate = true;
         StatusText = "正在检查更新…";
-        DetailText = "正在连接更新服务器";
-        await Task.Delay(700);
+        DetailText = $"正在连接 {CanApi.ApiHost}";
 
         try
         {
             if (_simulateOffline)
-                throw new TimeoutException("连接 update.can-network.example 超时。");
+            {
+                await Task.Delay(700);
+                throw new ApiException("timeout", $"连接 {CanApi.ApiHost} 超时（--offline 演示）。");
+            }
 
-            DetailText = "正在获取更新清单";
-            await Task.Delay(500);
-            Manifest = await Task.Run(ManifestSource.Load);
+            Manifest = await ManifestSource.FetchAsync();
         }
-        catch (Exception ex)
+        catch (ApiException ex)
         {
             Stage = SelfUpdateStage.Failed;
             StatusText = "无法检查更新";
-            DetailText = ex is FileNotFoundException ? "找不到更新清单 manifest.json。" : ex.Message;
+            DetailText = ex.Message;
             return;
         }
 
-        DetailText = $"正在比较版本（{Manifest.Server}）";
-        await Task.Delay(350);
-
-        var release = Manifest.Launcher;
-        if (!VersionUtil.IsNewer(release.Version, AppInfo.Version))
+        if (Manifest.Launcher is not { } release || !VersionUtil.IsNewer(release.Version, AppInfo.Version))
         {
             Stage = SelfUpdateStage.UpToDate;
             IsIndeterminate = false;
             Progress = 100;
             StatusText = "已是最新版本";
             DetailText = $"{AppInfo.Name} {AppInfo.Version}";
-            await Task.Delay(500);
+            await Task.Delay(300);
             Completed?.Invoke(this, Manifest);
             return;
         }
@@ -122,7 +121,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
     [RelayCommand]
     private async Task UpdateNowAsync()
     {
-        if (Manifest is null)
+        if (Manifest?.Launcher is null)
             return;
 
         _downloadCts = new CancellationTokenSource();

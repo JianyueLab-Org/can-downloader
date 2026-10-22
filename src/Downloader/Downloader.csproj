@@ -17,11 +17,16 @@
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.0" />
     <PackageReference Include="Avalonia.Themes.Simple" Version="12.1.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.13" />
   </ItemGroup>
 
-  <!-- 演示用的更新清单：模拟从更新服务器获取的数据，修改后在程序里点“检查更新”即可看到新增的软件 -->
+  <!--
+    软件库的显示信息（分类、名称、简介），软件列表本身来自 CAN API。嵌入 exe（单文件发布只有一个 exe）；
+    编译输出目录里另有一份，exe 旁边有 catalog.json 时优先使用，修改后点“检查更新”即生效。
+  -->
   <ItemGroup>
-    <None Include="Assets/manifest.json" Link="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets/catalog.json" LogicalName="catalog.json" />
+    <None Include="Assets/catalog.json" Link="catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>

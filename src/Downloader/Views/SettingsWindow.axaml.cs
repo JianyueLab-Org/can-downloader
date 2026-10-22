@@ -8,6 +8,8 @@ namespace Downloader.Views;
 public partial class SettingsWindow : Window
 {
     private readonly Dictionary<string, Control> _panels = [];
+    private Dictionary<string, object?>? _snapshot;
+    private bool _accepted;
 
     public SettingsWindow()
     {
@@ -16,6 +18,20 @@ public partial class SettingsWindow : Window
     }
 
     private SettingsViewModel Vm => (SettingsViewModel)DataContext!;
+
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        _snapshot = Vm.Snapshot();
+    }
+
+    // 取消或点 ✕ 关闭：还原到打开时（或上次“应用”时）的设置
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        if (!_accepted && _snapshot is not null)
+            Vm.Restore(_snapshot);
+    }
 
     private void OnMenuSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -40,14 +56,18 @@ public partial class SettingsWindow : Window
         _ => throw new ArgumentOutOfRangeException(nameof(tag), tag, null)
     };
 
-    // 界面原型：设置尚未持久化，仅重置“应用”按钮状态
     private void OnOkClick(object? sender, RoutedEventArgs e)
     {
-        Vm.MarkSaved();
+        Vm.Save();
+        _accepted = true;
         Close(true);
     }
 
-    private void OnApplyClick(object? sender, RoutedEventArgs e) => Vm.MarkSaved();
+    private void OnApplyClick(object? sender, RoutedEventArgs e)
+    {
+        Vm.Save();
+        _snapshot = Vm.Snapshot();
+    }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 }

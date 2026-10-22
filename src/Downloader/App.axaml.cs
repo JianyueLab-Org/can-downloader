@@ -2,19 +2,21 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Downloader.Services;
 using Downloader.ViewModels;
 using Downloader.Views;
 
 namespace Downloader;
 
 /// <summary>
-/// 启动流程：启动窗口（检查下载器更新）→ 登录窗口（登录前仍可更新下载器）→ 主界面。
+/// 启动流程：启动窗口（连接 CAN API、检查下载器更新）→ 登录窗口（登录前仍可更新下载器）→ 主界面。
+/// 勾选了“自动登录”且保存的会话仍有效时跳过登录窗口。
 /// 启动检查失败或在登录窗口选择离线模式时，不登录直接进入主界面（不能下载）。
 /// 主界面退出登录、离线模式点“登录”时回到登录窗口；“更新并重启”回到启动窗口。
 /// </summary>
 public partial class App : Application
 {
-    private readonly SettingsViewModel _settings = new();
+    private readonly SettingsViewModel _settings = SettingsViewModel.Load();
     private IClassicDesktopStyleApplicationLifetime? _desktop;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -25,6 +27,7 @@ public partial class App : Application
         {
             _desktop = desktop;
             desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            CanApi.Shared.Configure(_settings);
             // 命令行 --offline：演示无法连接更新服务器
             var offline = desktop.Args?.Contains("--offline") == true;
             ShowSplash(offline, autoUpdate: false);
@@ -45,10 +48,17 @@ public partial class App : Application
     {
         var vm = new SelfUpdateViewModel(offline, autoUpdate);
         var splash = new SplashWindow { DataContext = vm };
-        vm.Completed += (_, manifest) =>
+        vm.Completed += async (_, manifest) =>
         {
             if (manifest is null)
+            {
                 ShowMain(null, null, splash);
+                return;
+            }
+
+            vm.StatusText = "正在登录…";
+            if (await LoginViewModel.TryResumeAsync() is { } account)
+                ShowMain(manifest, account, splash);
             else
                 ShowLogin(manifest, splash);
         };

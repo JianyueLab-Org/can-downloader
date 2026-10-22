@@ -2,19 +2,21 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Downloader.Services;
 
 namespace Downloader.ViewModels;
 
 /// <summary>
 /// 主界面：软件库（由更新清单生成，按分类分组）、当前软件详情、下载队列。
-/// 界面原型：下载、安装都是模拟的，由 <see cref="DispatcherTimer"/> 推进进度。
+/// 下载经 <see cref="CanApi"/> 进行（本站中转或 GitHub），安装是把 zip 解压到安装目录并记录到 <see cref="LocalInstalls"/>；
+/// <see cref="DispatcherTimer"/> 定时把下载线程的进度刷新到界面。
 /// </summary>
 public sealed partial class MainWindowViewModel : ViewModelBase
 {
-    private const double TickSeconds = 0.1;
+    private const double TickSeconds = 0.25;
 
-    private readonly Random _random = new();
     private readonly DispatcherTimer _timer;
+    private readonly Dictionary<ProductViewModel, Transfer> _transfers = [];
     private UpdateManifest? _manifest;
     private LibraryEntry? _selectedEntry;
 
@@ -28,11 +30,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (account is null)
         {
             IsOffline = true;
-            // 离线模式：使用上次缓存的清单（界面原型中就是同一个文件），不能下载
-            if (manifest is null)
-            {
-                try { manifest = ManifestSource.Load(); } catch { /* 没有缓存时软件库为空 */ }
-            }
+            // 离线模式：使用上次缓存的清单，不能下载
+            manifest ??= ManifestSource.LoadCached();
             Notices.Add(new NoticeViewModel(NoticeKind.Warning, "离线模式：未登录，显示的是上次缓存的软件列表，不能下载或更新。",
                 "登录", () => LoginRequested?.Invoke(this, EventArgs.Empty)));
         }
@@ -50,15 +49,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public UpdateManifest? Manifest => _manifest;
 
     public UserAccount? Account { get; }
-    public string AccountText => Account is null ? "离线模式" : $"{Account.Name}（{Account.CanId}）";
+    public string AccountText => Account is null ? "离线模式" : $"{(Account.Name.Length > 0 ? Account.Name : "CAN 用户")}（{Account.CanId}）";
 
     /// <summary>退出登录或离线模式下点“登录”：回到登录窗口。</summary>
     public event EventHandler? LoginRequested;
 
-    /// <summary>退出登录：停止下载，回到登录窗口。</summary>
-    public void Logout()
+    /// <summary>退出登录：停止下载（已下载的部分保留，下次可续传），吊销会话，回到登录窗口。</summary>
+    public async Task LogoutAsync()
     {
         _timer.Stop();
+        foreach (var transfer in _transfers.Values)
+            transfer.Cts?.Cancel();
+        await CanApi.Shared.SignOutAsync();
+        AccountStore.ForgetSession();
+        Log.Info("退出登录");
         LoginRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -79,7 +83,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// <summary>主界面“更新并重启”：关闭主窗口，重新进入启动检查并自动下载。</summary>
     public event EventHandler? RestartForUpdateRequested;
 
-    /// <summary>需要主窗口显示的提示（界面原型中的打开软件等）。</summary>
+    /// <summary>需要主窗口显示的提示（例如找不到要打开的程序）。</summary>
     public event EventHandler<(string Title, string Message)>? MessageRequested;
 
     [ObservableProperty]
@@ -142,7 +146,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void ApplyManifest(UpdateManifest manifest, bool announce)
     {
         _manifest = manifest;
-        ManifestInfo = $"清单发布于 {manifest.PublishedAt.ToLocalTime():yyyy-MM-dd HH:mm} · {manifest.Server}";
+        ManifestInfo = $"发布于 {manifest.PublishedAt.ToLocalTime():yyyy-MM-dd HH:mm} · {manifest.Server}";
 
         var categoryNames = manifest.Categories.ToDictionary(c => c.Id, c => c.Name);
         var productNames = manifest.Products.ToDictionary(p => p.Id, p => p.Name);
@@ -171,11 +175,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             }
             else
             {
+                var record = LocalInstalls.Find(item.Id);
                 product = new ProductViewModel(item.Id)
                 {
                     IsOffline = IsOffline,
-                    InstalledVersion = LocalInstalls.FindVersion(item.Id),
-                    InstallPath = Path.Combine(Settings.InstallRoot, item.Name)
+                    InstalledVersion = record?.Version,
+                    InstallPath = record?.Path ?? DefaultInstallPath(item.Id)
                 };
                 product.Apply(item, categoryNames.GetValueOrDefault(item.Category, "其他"), productNames);
                 product.IsNew = announce;
@@ -204,10 +209,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (!announce)
             return;
 
-        if (VersionUtil.IsNewer(manifest.Launcher.Version, AppInfo.Version))
+        if (manifest.Launcher is { } launcher && VersionUtil.IsNewer(launcher.Version, AppInfo.Version))
         {
             Notices.Add(new NoticeViewModel(NoticeKind.Update,
-                $"{AppInfo.Name} {manifest.Launcher.Version} 已发布（当前 {AppInfo.Version}）。",
+                $"{AppInfo.Name} {launcher.Version} 已发布（当前 {AppInfo.Version}）。",
                 "更新并重启", () => RestartForUpdateRequested?.Invoke(this, EventArgs.Empty)));
         }
 
@@ -270,8 +275,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         IsChecking = true;
         try
         {
-            await Task.Delay(900);
-            var manifest = await Task.Run(ManifestSource.Load);
+            CanApi.Shared.Configure(Settings);
+            var manifest = await ManifestSource.FetchAsync();
 
             // 清除上一次检查留下的提示与“新”标记
             Notices.Clear();
@@ -281,7 +286,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             ApplyManifest(manifest, announce: true);
             LastCheckText = $"已检查 {DateTime.Now:HH:mm}";
         }
-        catch (Exception ex)
+        catch (ApiException ex)
         {
             Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"检查更新失败：{ex.Message}", "重试", () => _ = CheckUpdatesAsync()));
         }
@@ -292,14 +297,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     private bool CanCheckUpdates() => !IsChecking && !IsOffline;
-
-    /// <summary>演示：模拟服务器发布了新软件和新版本，然后检查更新。</summary>
-    [RelayCommand]
-    private Task SimulateReleaseAsync()
-    {
-        ManifestSource.IncludeDemoRelease = true;
-        return CheckUpdatesAsync();
-    }
 
     [RelayCommand]
     private void DismissNotice(NoticeViewModel notice) => Notices.Remove(notice);
@@ -312,6 +309,28 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     // ========== 下载队列 ==========
+
+    /// <summary>一个软件的下载任务。暂停时取消下载、保留 .part 文件，继续时续传。</summary>
+    private sealed class Transfer(ProductTask task, string zipPath)
+    {
+        public ProductTask Task { get; } = task;
+        public string ZipPath { get; } = zipPath;
+        public DownloadProgress Progress { get; } = new();
+        public CancellationTokenSource? Cts { get; set; }
+        /// <summary>上一次下载的任务。继续下载前要等它释放 .part 文件。</summary>
+        public Task? Run { get; set; }
+        /// <summary>上次刷新界面时的已下载字节数，-1 表示刚开始。</summary>
+        public long LastBytes { get; set; }
+    }
+
+    public string DefaultInstallPath(string id) => Path.Combine(Settings.InstallRootPath, id);
+
+    /// <summary>设置里改了默认安装目录：未安装的软件跟着改。</summary>
+    public void RefreshDefaultPaths()
+    {
+        foreach (var product in Products.Where(p => !p.IsInstalled && !p.IsBusy))
+            product.InstallPath = DefaultInstallPath(product.Id);
+    }
 
     [RelayCommand]
     private void UpdateAll()
@@ -345,6 +364,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public void Update(ProductViewModel product) => Enqueue(product, ProductTask.Update);
 
+    /// <summary>修复：重新下载最新的安装包并覆盖安装。</summary>
     public void Repair(ProductViewModel product) => Enqueue(product, ProductTask.Repair);
 
     private void Enqueue(ProductViewModel product, ProductTask task)
@@ -353,59 +373,278 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
 
         product.CurrentTask = task;
-        // 修复只重新下载校验失败的文件，演示中按 15% 计
-        product.TotalBytes = task == ProductTask.Repair ? product.DownloadSize * 0.15 : product.DownloadSize;
+        product.TotalBytes = product.DownloadSize;
         product.DownloadedBytes = 0;
         product.Speed = 0;
         product.Progress = 0;
         product.PhaseText = TaskTitle(product);
         product.TransferText = "等待其他下载完成";
         product.State = ProductState.Queued;
+        _transfers[product] = new Transfer(task, PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion));
 
+        Pump();
+    }
+
+    /// <summary>按设置的同时下载数启动排队中的项目。</summary>
+    private void Pump()
+    {
+        CanApi.Shared.Configure(Settings);
+        var active = Products.Count(p => p.State == ProductState.Downloading);
+        var maxConcurrent = Math.Max(1, (int)Settings.MaxConcurrentDownloads);
+        foreach (var next in Products.Where(p => p.State == ProductState.Queued).ToList())
+        {
+            if (active >= maxConcurrent)
+                break;
+            if (!_transfers.TryGetValue(next, out var transfer))
+                continue;
+            Start(next, transfer);
+            active++;
+        }
+
+        if (Products.Any(p => p.State is ProductState.Queued or ProductState.Downloading))
+            _timer.Start();
         RefreshSummary();
-        _timer.Start();
+    }
+
+    private void Start(ProductViewModel product, Transfer transfer)
+    {
+        // 下载源：本站中转（默认）或 GitHub 原始地址
+        var url = Settings.UseGitHub && product.OriginUrl is { } origin ? origin : product.DownloadUrl;
+        if (!Uri.TryCreate(CanApi.BaseUri, url, out var uri))
+        {
+            Fail(product, transfer, "下载失败", new InvalidDataException("没有可用的下载地址。"));
+            return;
+        }
+
+        product.State = ProductState.Downloading;
+        product.Speed = 0;
+        product.TransferText = $"正在连接 {uri.Host}…";
+        var cts = new CancellationTokenSource();
+        transfer.Cts = cts;
+        transfer.LastBytes = -1;
+        Log.Info($"开始下载 {product.Id} {product.LatestVersion}（{(Settings.UseGitHub ? "GitHub" : "本站")}）→ {transfer.ZipPath}");
+        transfer.Run = RunAsync(product, transfer, uri, transfer.Run, cts.Token);
+    }
+
+    /// <summary>下载，然后校验、安装。暂停、取消时下载被取消，状态已由调用方设置好。</summary>
+    private async Task RunAsync(ProductViewModel product, Transfer transfer, Uri url, Task? previous, CancellationToken ct)
+    {
+        if (previous is not null)
+        {
+            try { await previous; }
+            catch { /* 上一次的结果已经处理过 */ }
+        }
+
+        try
+        {
+            var expectedSize = product.DownloadSize;
+            await Task.Run(() => PackageInstaller.DownloadAsync(url, transfer.ZipPath, expectedSize, transfer.Progress,
+                SpeedLimitPerDownload, ct), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Fail(product, transfer, "下载失败", ex);
+            Pump();
+            return;
+        }
+
+        if (ct.IsCancellationRequested || !_transfers.ContainsKey(product))
+            return;
+        Log.Info($"下载完成 {product.Id} {product.LatestVersion}（{transfer.Progress.Total} 字节）");
+        product.Speed = 0;
+        product.State = ProductState.Installing;
+        Pump();
+        await InstallPackageAsync(product, transfer);
+    }
+
+    private volatile int _activeDownloads;
+
+    /// <summary>限速平均分给正在下载的项目（在下载线程上调用）。</summary>
+    private double SpeedLimitPerDownload()
+    {
+        var limit = Settings.SpeedLimitBytes;
+        return limit <= 0 ? 0 : limit / Math.Max(1, _activeDownloads);
+    }
+
+    /// <summary>下载完成：校验、解压到安装目录、删除旧版本多余的文件、记录安装。</summary>
+    private async Task InstallPackageAsync(ProductViewModel product, Transfer transfer)
+    {
+        product.State = ProductState.Installing;
+        product.Progress = 100;
+        product.TransferText = "";
+        RefreshSummary();
+
+        var zip = transfer.ZipPath;
+        var installDir = product.InstallPath;
+        try
+        {
+            if (Settings.VerifyAfterDownload)
+            {
+                product.PhaseText = "正在校验文件…";
+                try
+                {
+                    await Task.Run(() => PackageInstaller.Verify(zip));
+                }
+                catch (InvalidDataException)
+                {
+                    TryDelete(zip);
+                    throw new InvalidDataException("安装包已损坏，已删除，请重新下载。");
+                }
+            }
+
+            product.PhaseText = transfer.Task switch
+            {
+                ProductTask.Repair => "正在修复…",
+                ProductTask.Update => "正在更新…",
+                _ => "正在安装…"
+            };
+            var previous = LocalInstalls.Find(product.Id);
+            var files = await Task.Run(() => PackageInstaller.Extract(zip, installDir));
+            if (previous is not null)
+                await Task.Run(() => PackageInstaller.RemoveStale(previous, files, installDir));
+
+            Log.Info($"已安装 {product.Id} {product.LatestVersion} → {installDir}（{files.Count} 个文件）");
+            LocalInstalls.Set(new InstallRecord
+            {
+                Id = product.Id,
+                Version = product.LatestVersion,
+                Path = installDir,
+                Files = files,
+                InstalledAt = DateTimeOffset.Now
+            });
+            product.InstalledVersion = product.LatestVersion;
+            if (Settings.DeleteCacheAfterInstall)
+                TryDelete(zip);
+        }
+        catch (Exception ex)
+        {
+            Fail(product, transfer, transfer.Task == ProductTask.Install ? "安装失败" : "更新失败", ex);
+            return;
+        }
+
+        _transfers.Remove(product);
+        product.RefreshState();
+        RefreshSummary();
+
+        if (Settings.LaunchAfterInstall && transfer.Task == ProductTask.Install && product.Executable is not null)
+            Launch(product);
+    }
+
+    /// <summary>下载或安装失败：恢复状态，用提示条报告原因并提供重试。</summary>
+    private void Fail(ProductViewModel product, Transfer transfer, string title, Exception ex)
+    {
+        Log.Error($"{product.Id} {title}", ex);
+        _transfers.Remove(product);
+        product.RefreshState();
+        RefreshSummary();
+        var task = transfer.Task;
+        Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"{product.Name} {title}：{Describe(ex, product)}",
+            "重试", () => Enqueue(product, task)));
+    }
+
+    private static string Describe(Exception ex, ProductViewModel product) => ex switch
+    {
+        ApiException or InvalidDataException => ex.Message,
+        UnauthorizedAccessException => $"没有写入权限（{ex.Message}）。可以在设置中更换安装目录或下载缓存目录。",
+        IOException => $"文件被占用或无法写入，如果 {product.Name} 正在运行请先关闭。（{ex.Message}）",
+        _ => ex.Message
+    };
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 删不掉缓存不影响安装 */ }
     }
 
     public void TogglePause(ProductViewModel product)
     {
+        if (!_transfers.TryGetValue(product, out var transfer))
+            return;
         switch (product.State)
         {
             case ProductState.Queued or ProductState.Downloading:
                 product.State = ProductState.Paused;
+                transfer.Cts?.Cancel();
+                Log.Info($"暂停下载 {product.Id}");
                 product.Speed = 0;
                 product.TransferText = $"{Format.Size(product.DownloadedBytes)} / {Format.Size(product.TotalBytes)} · 已暂停";
                 break;
             case ProductState.Paused:
                 product.State = ProductState.Queued;
                 product.TransferText = "等待其他下载完成";
-                _timer.Start();
                 break;
         }
-        RefreshSummary();
+        Pump();
     }
 
+    /// <summary>取消下载：删除已下载的部分。</summary>
     public void Cancel(ProductViewModel product)
     {
-        if (!product.IsTransferring)
+        if (!product.IsTransferring || !_transfers.Remove(product, out var transfer))
             return;
+        transfer.Cts?.Cancel();
+        Log.Info($"取消下载 {product.Id}");
         product.RefreshState();
         RemoveIfDelisted(product);
-        RefreshSummary();
+        _ = DeletePartialAsync(transfer);
+        Pump();
+    }
+
+    private static async Task DeletePartialAsync(Transfer transfer)
+    {
+        try { if (transfer.Run is not null) await transfer.Run; }
+        catch { /* 已取消 */ }
+        TryDelete(PackageInstaller.PartialPath(transfer.ZipPath));
     }
 
     public async Task UninstallAsync(ProductViewModel product)
     {
+        var record = LocalInstalls.Find(product.Id);
         product.State = ProductState.Installing;
         product.PhaseText = "正在卸载…";
-        await Task.Delay(1000);
-        product.InstalledVersion = null;
+        try
+        {
+            if (record is not null)
+                await Task.Run(() => PackageInstaller.Uninstall(record));
+            Log.Info($"已卸载 {product.Id}（{record?.Path}）");
+            LocalInstalls.Remove(product.Id);
+            product.InstalledVersion = null;
+            product.InstallPath = DefaultInstallPath(product.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error($"{product.Id} 卸载失败", ex);
+            Notices.Add(new NoticeViewModel(NoticeKind.Warning,
+                $"{product.Name} 卸载失败：{Describe(ex, product)}", "重试", () => _ = UninstallAsync(product)));
+        }
         product.RefreshState();
         RemoveIfDelisted(product);
         RefreshSummary();
     }
 
-    public void Launch(ProductViewModel product) =>
-        MessageRequested?.Invoke(this, ("打开", $"界面原型：将启动 {Path.Combine(product.InstallPath, product.Executable ?? "")}。"));
+    public void Launch(ProductViewModel product)
+    {
+        var exe = Path.Combine(product.InstallPath, product.Executable ?? "");
+        if (!File.Exists(exe))
+        {
+            MessageRequested?.Invoke(this, ("打开", $"找不到 {exe}。可以在 ⋯ 菜单中“校验并修复”。"));
+            return;
+        }
+        try
+        {
+            Log.Info($"启动 {exe}");
+            Shell.Open(exe, product.InstallPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"无法启动 {exe}", ex);
+            MessageRequested?.Invoke(this, ("打开", $"无法启动 {product.Name}：{ex.Message}"));
+        }
+    }
 
     private void RemoveIfDelisted(ProductViewModel product)
     {
@@ -418,70 +657,40 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private static string TaskTitle(ProductViewModel product) => product.CurrentTask switch
     {
         ProductTask.Update => $"更新 {product.InstalledVersion} → {product.LatestVersion}",
-        ProductTask.Repair => "校验并修复",
+        ProductTask.Repair => $"重新下载并修复 {product.LatestVersion}",
         _ => $"安装 {product.LatestVersion}"
     };
 
-    /// <summary>推进模拟下载：按并发数启动排队的项目，按限速分配带宽。</summary>
+    /// <summary>把下载线程的进度刷新到界面，计算速度与剩余时间。</summary>
     private void Tick()
     {
-        var active = Products.Where(p => p.State == ProductState.Downloading).ToList();
-        var maxConcurrent = Math.Max(1, (int)Settings.MaxConcurrentDownloads);
-        foreach (var next in Products.Where(p => p.State == ProductState.Queued).ToList())
+        foreach (var product in Products.Where(p => p.State == ProductState.Downloading))
         {
-            if (active.Count >= maxConcurrent)
-                break;
-            next.State = ProductState.Downloading;
-            active.Add(next);
-        }
+            if (!_transfers.TryGetValue(product, out var transfer))
+                continue;
+            var downloaded = transfer.Progress.Downloaded;
+            var total = transfer.Progress.Total;
+            if (total <= 0)
+                continue;   // 还在连接
+            if (transfer.LastBytes < 0)
+            {
+                // 刚开始：续传时已有的部分不计入速度
+                transfer.LastBytes = downloaded;
+                continue;
+            }
 
-        var limit = Settings.SpeedLimitBytes;
-        foreach (var product in active)
-        {
-            var target = (6 + _random.NextDouble() * 8) * 1024 * 1024;
-            product.Speed = product.Speed <= 0 ? target : product.Speed * 0.8 + target * 0.2;
-            var speed = limit > 0 ? Math.Min(product.Speed, limit / active.Count) : product.Speed;
-
-            product.DownloadedBytes = Math.Min(product.TotalBytes, product.DownloadedBytes + speed * TickSeconds);
-            product.Progress = product.TotalBytes <= 0 ? 100 : product.DownloadedBytes / product.TotalBytes * 100;
-            product.TransferText = $"{Format.Size(product.DownloadedBytes)} / {Format.Size(product.TotalBytes)} · {Format.Speed(speed)} · {Format.Remaining((product.TotalBytes - product.DownloadedBytes) / speed)}";
-
-            if (product.DownloadedBytes >= product.TotalBytes)
-                _ = FinishAsync(product);
+            var instant = Math.Max(0, downloaded - transfer.LastBytes) / TickSeconds;
+            transfer.LastBytes = downloaded;
+            product.Speed = product.Speed <= 0 ? instant : product.Speed * 0.7 + instant * 0.3;
+            product.DownloadedBytes = downloaded;
+            product.TotalBytes = total;
+            product.Progress = (double)downloaded / total * 100;
+            var remaining = product.Speed > 1 ? Format.Remaining((total - downloaded) / product.Speed) : "正在计算剩余时间";
+            product.TransferText = $"{Format.Size(downloaded)} / {Format.Size(total)} · {Format.Speed(product.Speed)} · {remaining}";
         }
 
         if (!Products.Any(p => p.State is ProductState.Queued or ProductState.Downloading))
             _timer.Stop();
-        RefreshSummary();
-    }
-
-    /// <summary>下载完成：校验、解压、安装。</summary>
-    private async Task FinishAsync(ProductViewModel product)
-    {
-        product.State = ProductState.Installing;
-        product.Progress = 100;
-        product.TransferText = "";
-
-        if (Settings.VerifyAfterDownload)
-        {
-            product.PhaseText = "正在校验文件…";
-            await Task.Delay(700);
-        }
-        if (product.CurrentTask != ProductTask.Repair)
-        {
-            product.PhaseText = "正在解压…";
-            await Task.Delay(700);
-        }
-        product.PhaseText = product.CurrentTask switch
-        {
-            ProductTask.Repair => "正在修复…",
-            ProductTask.Update => "正在更新…",
-            _ => "正在安装…"
-        };
-        await Task.Delay(700);
-
-        product.InstalledVersion = product.LatestVersion;
-        product.RefreshState();
         RefreshSummary();
     }
 
@@ -493,6 +702,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(LibrarySummary));
 
         var downloading = Products.Where(p => p.State == ProductState.Downloading).ToList();
+        _activeDownloads = downloading.Count;
         var waiting = Products.Count(p => p.State is ProductState.Queued or ProductState.Paused);
         var installing = Products.Count(p => p.State == ProductState.Installing);
         HasTransfers = downloading.Count + waiting + installing > 0;
@@ -500,9 +710,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var parts = new List<string>();
         if (downloading.Count > 0)
         {
-            var limit = Settings.SpeedLimitBytes;
-            var speed = downloading.Sum(p => limit > 0 ? Math.Min(p.Speed, limit / downloading.Count) : p.Speed);
-            parts.Add($"↓ {Format.Speed(speed)}");
+            parts.Add($"↓ {Format.Speed(downloading.Sum(p => p.Speed))}");
             parts.Add($"下载 {downloading.Count} 项");
         }
         if (waiting > 0)
@@ -511,19 +719,4 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             parts.Add($"安装 {installing} 项");
         TransferSummary = string.Join(" · ", parts);
     }
-}
-
-/// <summary>本机已安装的软件。界面原型：演示数据，实际应读取本机安装记录。</summary>
-public static class LocalInstalls
-{
-    private static readonly Dictionary<string, string> Versions = new()
-    {
-        ["pilot-client"] = "1.3.2",
-        ["controller-client"] = "2.0.1",
-        ["msfs-plugin"] = "1.2.3",
-        ["navdata"] = "2610",
-        ["sector-files"] = "2026.10"
-    };
-
-    public static string? FindVersion(string id) => Versions.GetValueOrDefault(id);
 }

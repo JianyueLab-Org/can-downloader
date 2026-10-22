@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Downloader.Services;
 using Downloader.ViewModels;
 
 namespace Downloader.Views;
@@ -35,6 +36,12 @@ public partial class ProductView : UserControl
     {
         if (Product is { } product && Host is { } host)
             await host.OpenFolderAsync(product);
+    }
+
+    private void OnNotesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Product?.NotesUrl is { } url)
+            Shell.Open(url);
     }
 
     private async void OnUninstallClick(object? sender, RoutedEventArgs e)

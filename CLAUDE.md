@@ -4,12 +4,13 @@
 
 ## 项目概况
 
-CAN 下载器的**界面原型**：Avalonia 12.1 + .NET 10，用来安装、更新 CAN 的各个客户端与数据。更新服务器、登录、下载、安装都是 ViewModel 里的模拟，尚未接入真实服务。界面风格与 `can-client-ui`（飞行员 / 管制员 / 通播客户端）一致，`Styles/Theme/*`、`TitleBar`、`DialogView`、`ResizeGrips` 是那边的副本（命名空间不同），改动通用外观时两边要同步。
+CAN 下载器：Avalonia 12.1 + .NET 10，用来安装、更新 CAN 的各个客户端。已接入 CAN API（线上 https://api.ceruleanavi.net，源码在 `G:\can-api-main`）：登录、软件列表、下载都是真实的；下载器自身的更新 API 尚未提供，`SelfUpdateViewModel` 的下载安装流程仍是模拟。界面风格与 `can-client-ui`（飞行员 / 管制员 / 通播客户端）一致，`Styles/Theme/*`、`TitleBar`、`DialogView`、`ResizeGrips` 是那边的副本（命名空间不同），改动通用外观时两边要同步。
 
 ```bash
 dotnet build                                   # 通过 CanDownloader.slnx 编译，应当 0 警告 0 错误
 dotnet run --project src/Downloader
-dotnet run --project src/Downloader -- --offline   # 演示无法连接更新服务器
+dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
+dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/win-x64/Downloader.exe（自包含）
 ```
 
 ## 结构
@@ -18,12 +19,18 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接更新服
 |---|---|
 | 启动流程：**启动窗口 → 登录窗口 → 主界面**，窗口切换都在 `App.axaml.cs` | |
 | 启动窗口：先检查下载器自身更新（检查中 → 已是最新 / 发现新版本 → 下载 → 安装并重启；失败时 重试 / 离线模式） | `Views/SplashWindow.axaml`，`ViewModels/SelfUpdateViewModel.cs` |
-| 登录窗口：**登录后才能进入主界面**；启动时选了“稍后”的话这里还能更新下载器；也可以选离线模式（不登录，只能看缓存的软件列表，不能下载）。主界面离线时工具栏有“登录”，登录后右上角账号菜单可退出登录 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs` |
-| 更新清单：下载器最新版本、分类、软件（版本、组件、依赖、更新日志）。**软件库完全由清单生成**，清单新增条目即自动出现，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，演示数据 `Assets/manifest.json`（复制到输出目录根，修改后点“检查更新”即生效） |
+| 登录窗口：**登录后才能进入主界面**；密码登录或邮箱验证码登录，自动登录时会话加密保存在本机；也可以选离线模式（不登录，只能看缓存的软件列表，不能下载）。主界面离线时工具栏有“登录”，登录后右上角账号菜单可退出登录 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs` |
+| CAN API 客户端（cookie 会话 `can_session`、错误码转中文、代理与超时取自设置） | `Services/CanApi.cs`、`Services/ApiModels.cs` |
+| 软件清单：由 `GET /api/v1/clients/latest` 生成，显示信息（分类、名称、图标、简介）来自 `Assets/catalog.json`。**软件库完全由 API 决定**，API 新增客户端即自动出现，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，`Assets/catalog.json`（复制到输出目录根） |
+| 下载（续传、限速、本站 / GitHub 下载源）、zip 校验、解压安装、卸载 | `Services/PackageInstaller.cs` |
+| **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、账号、清单缓存）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。不要改回 %LocalAppData% | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
+| 安装位置：设置里的默认安装目录 + 安装对话框里询问（设置可关闭“安装时询问安装位置”，关闭后没有其他可选项时不弹对话框） | `Views/InstallView.axaml`、`ViewModels/InstallViewModel.cs`、`Views/FolderPicker.cs` |
 | 主界面：工具栏（检查更新、全部更新、设置、⋯、账号）、提示条（新上架、可更新、下载器新版本、离线）、左侧按分类分组的软件库、右侧软件详情与下载进度 | `Views/MainWindow.axaml`、`Views/ProductView.axaml`，`ViewModels/MainWindowViewModel.cs`、`ProductViewModel.cs` |
 | 安装对话框（位置、组件、依赖、磁盘空间）、设置（常规 / 下载 / 更新 / 网络） | `Views/InstallView.axaml`、`Views/SettingsWindow.axaml` + `Views/Settings/*.axaml` |
 
-本机已安装版本是 `LocalInstalls` 里的演示数据；下载、校验、安装由 `DispatcherTimer` 模拟，遵守设置里的同时下载数与限速。
+下载在后台线程进行，`MainWindowViewModel` 用 `DispatcherTimer` 把进度刷新到界面；遵守设置里的同时下载数、限速与下载源。设置保存在 `data/settings.json`（`SettingsViewModel` 所有可写公共属性），程序目录内的路径存相对路径；设置窗口“取消”/✕ 会还原。
+
+发布是**单文件**（`Properties/PublishProfiles/win-x64.pubxml`）：新增数据文件要嵌入 exe（`EmbeddedResource`），不要依赖 exe 旁边的文件。
 
 ## 设计要求（与 can-client-ui 一致，不要回退）
 
@@ -51,11 +58,14 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接更新服
 - 一个 Style 选择器里混用不同类型设置 `FontFamily` 会编译失败，要拆开。
 - `TextBlock` 里多个 `<Run>` 之间的换行会产生空格，写在同一行。
 - 按钮、标签头字符串里的下划线会被当成快捷键吞掉。
-- 清单文件要用 `Link="manifest.json"` 复制到输出目录根，否则会落在 `Assets/` 下读不到。
+- `catalog.json` 既嵌入 exe（`LogicalName="catalog.json"`），也用 `Link="catalog.json"` 复制到编译输出目录根（方便修改，发布时不复制）。
+- 单文件发布时 SkiaSharp 包会带出 100 MB 的原生 .pdb，发布配置里已排除。
+- PowerShell 5 读不带 BOM 的 UTF-8 脚本会把中文弄乱；UI Automation 脚本里有中文时存成带 BOM 的文件。
+- can-api 的登录接口要求 `Content-Type: application/json`，否则返回 415。
 
 ## 验证方式
 
-没有自动化测试。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
+没有自动化测试。不要用真实账号密码测试登录（线上服务）。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
 
 ## Git
 
