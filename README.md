@@ -81,7 +81,7 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
 dotnet publish src/Downloader -p:PublishProfile=win-x64
 ```
 
-版本号只在 `src/Downloader/Downloader.csproj` 的 `<Version>` 里写一处，GitHub Release 的 tag 为 `v<版本号>`（0.x 是预发布，1.0.0 是第一个正式版）。
+版本号只在 `src/Downloader/Downloader.csproj` 的 `<Version>` 里写一处，GitHub Release 的 tag 为 `v<版本号>`（0.x 是预发布；正式版从 3.0.0 起编号，之前发过的 1.0.0 是同一条线上的旧版本）。
 
 输出 `publish/win-x64/Downloader.exe` 一个文件（约 49 MB）：自包含，不需要安装 .NET；Avalonia 的原生库也打包在内，首次运行时解压到临时目录。`catalog.json` 嵌入在 exe 里，exe 旁边放一个 `catalog.json` 会优先使用。
 

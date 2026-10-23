@@ -74,4 +74,4 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 - 远程：`https://github.com/JianyueLab-Org/can-downloader`，分支 `main`。
 - 本机 Clash 代理（127.0.0.1:7897）连 GitHub 时 TLS 会失败，推送时绕过代理：`git -c http.proxy= push`。
 - 只在用户要求时提交或推送。
-- CI：`.github/workflows/build.yml`。推送 main / PR 只编译；推送 tag `v<版本号>`（必须与 `Downloader.csproj` 的 `<Version>` 一致，否则失败）时单文件发布，打包 `CAN-Downloader-<版本号>-win-x64.zip`（只含 `Downloader.exe`）上传到同名 Release。Release 已存在时只覆盖安装包、不改发布说明（发布说明会显示为下载器的更新说明）；0.x 标为预发布，1.0.0 起标为正式版、最新版。
+- CI：`.github/workflows/build.yml`。推送 main / PR 只编译；推送 tag `v<版本号>`（必须与 `Downloader.csproj` 的 `<Version>` 一致，否则失败）时单文件发布，打包 `CAN-Downloader-<版本号>-win-x64.zip`（只含 `Downloader.exe`）上传到同名 Release。Release 已存在时只覆盖安装包、不改发布说明（发布说明会显示为下载器的更新说明）；0.x 标为预发布，其余标为正式版、最新版。正式版号从 3.0.0 起（曾发过 1.0.0），下一个版本在此基础上递增。
