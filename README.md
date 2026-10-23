@@ -26,7 +26,7 @@
 | 软件库 | 左侧按分类分组、可搜索；**软件来自 API 的发布信息**，API 新增客户端后点“检查更新”即自动出现，移除的已安装软件标记“已下架” |
 | 软件详情 | 安装 / 更新 / 打开，下载进度（暂停、继续、取消；暂停后续传），简介、版本信息、更新说明链接；⋯ 菜单：打开目录、校验并修复（重新下载覆盖安装）、卸载 |
 | 安装 | 安装位置（可浏览选择；设置里关闭“安装时询问安装位置”后不显示，直接装到默认目录）、可选组件、同时安装依赖项、所需与可用空间 |
-| 设置 | 常规、下载（默认安装目录、是否询问安装位置、缓存、同时下载数、限速、校验）、更新（渠道、**下载源：本站 / GitHub**、检查频率、自动更新）、网络（代理、超时）。保存在 `data/settings.json` |
+| 设置 | 常规、下载（默认安装目录、是否询问安装位置、缓存、同时下载数、限速、校验）、更新（**下载源：本站 / GitHub**、检查频率、自动更新）、网络（代理、超时）。保存在 `data/settings.json` |
 
 ## 软件清单
 
@@ -81,7 +81,7 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
 dotnet publish src/Downloader -p:PublishProfile=win-x64
 ```
 
-版本号只在 `src/Downloader/Downloader.csproj` 的 `<Version>` 里写一处，GitHub Release 的 tag 为 `v<版本号>`（从 0.0.1 起，0.x 都是预发布）。
+版本号只在 `src/Downloader/Downloader.csproj` 的 `<Version>` 里写一处，GitHub Release 的 tag 为 `v<版本号>`（0.x 是预发布，1.0.0 是第一个正式版）。
 
 输出 `publish/win-x64/Downloader.exe` 一个文件（约 49 MB）：自包含，不需要安装 .NET；Avalonia 的原生库也打包在内，首次运行时解压到临时目录。`catalog.json` 嵌入在 exe 里，exe 旁边放一个 `catalog.json` 会优先使用。
 

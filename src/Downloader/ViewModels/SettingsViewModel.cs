@@ -124,7 +124,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _deleteCacheAfterInstall = true;
 
     // —— 更新 ——
-    public IReadOnlyList<string> Channels { get; } = ["稳定版", "测试版", "开发版"];
     public const string SourceSite = "本站（api.ceruleanavi.net）";
     public const string SourceGitHub = "GitHub";
 
@@ -132,7 +131,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<string> DownloadSources { get; } = [SourceSite, SourceGitHub];
     public IReadOnlyList<string> CheckIntervals { get; } = ["仅启动时", "每小时", "每 6 小时", "每天"];
 
-    [ObservableProperty] private string? _channel = "稳定版";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(UseGitHub))]
     private string? _downloadSource = SourceSite;

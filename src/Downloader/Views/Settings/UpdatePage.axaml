@@ -3,13 +3,8 @@
              xmlns:vm="using:Downloader.ViewModels"
              x:Class="Downloader.Views.Settings.UpdatePage"
              x:DataType="vm:SettingsViewModel">
-  <!-- 更新：渠道、下载源、检查频率、自动更新 -->
+  <!-- 更新：下载源、检查频率、自动更新 -->
   <StackPanel Width="340" HorizontalAlignment="Left">
-    <TextBlock Classes="label" Text="更新渠道" />
-    <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding Channel}" HorizontalAlignment="Stretch" />
-    <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"
-               Text="测试版与开发版会更早收到新功能，也可能不稳定。下载器与已安装的软件使用同一渠道。" />
-
     <TextBlock Classes="label" Text="下载源" />
     <ComboBox ItemsSource="{Binding DownloadSources}" SelectedItem="{Binding DownloadSource}" HorizontalAlignment="Stretch" />
     <TextBlock Classes="caption" Margin="0,4,0,0" TextWrapping="Wrap"

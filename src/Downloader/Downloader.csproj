@@ -10,7 +10,7 @@
     <AssemblyName>Downloader</AssemblyName>
     <RootNamespace>Downloader</RootNamespace>
     <!-- 下载器版本号：唯一的来源，界面、日志、User-Agent 都从程序集读取；发布 tag 为 v<版本号> -->
-    <Version>0.0.2</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
