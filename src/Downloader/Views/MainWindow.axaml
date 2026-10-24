@@ -37,6 +37,7 @@
       <Border DockPanel.Dock="Top" Classes="toolbar" PointerPressed="OnToolbarPointerPressed">
         <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="{DynamicResource Space.Md}">
           <WrapPanel ItemSpacing="{DynamicResource Space.Sm}" LineSpacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
+            <Image Classes="toolbarLogo" Source="/Assets/app-logo.png" ToolTip.Tip="CAN 下载器" />
             <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}"
                     ToolTip.Tip="重新从 api.ceruleanavi.net 获取发布信息：新上架的软件会自动出现在软件库中" />
             <Button Classes="primary" Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}"
