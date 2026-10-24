@@ -361,7 +361,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         product.PhaseText = TaskTitle(product);
         product.TransferText = "等待其他下载完成";
         product.State = ProductState.Queued;
-        _transfers[product] = new Transfer(task, PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion));
+        _transfers[product] = new Transfer(task, PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion, product.PackageExtension));
 
         Pump();
     }
@@ -465,6 +465,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             // 发布方提供了 SHA-256 时总是核对；“下载完成后校验文件”另外完整读取一遍压缩包
             var sha256 = product.Sha256;
+            if (sha256 is null && product.ChecksumsUrl is { } checksums && product.DownloadUrl is { } download)
+            {
+                product.PhaseText = "正在获取校验值…";
+                sha256 = await PackageInstaller.LookupSha256Async(checksums, Path.GetFileName(new Uri(download).AbsolutePath));
+            }
             if (sha256 is not null || Settings.VerifyAfterDownload)
             {
                 product.PhaseText = "正在校验文件…";
@@ -617,16 +622,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public void Launch(ProductViewModel product)
     {
-        var exe = Path.Combine(product.InstallPath, product.Executable ?? "");
-        if (!File.Exists(exe))
+        var exe = PlatformInfo.FindLaunchTarget(product.InstallPath, product.Executable ?? "");
+        if (exe is null)
         {
-            MessageRequested?.Invoke(this, ("打开", $"找不到 {exe}。可以在 ⋯ 菜单中“校验并修复”。"));
+            MessageRequested?.Invoke(this, ("打开", $"找不到 {Path.Combine(product.InstallPath, product.Executable ?? "")}。可以在 ⋯ 菜单中“校验并修复”。"));
             return;
         }
         try
         {
             Log.Info($"启动 {exe}");
-            Shell.Open(exe, product.InstallPath);
+            Shell.Launch(exe, product.InstallPath);
         }
         catch (Exception ex)
         {

@@ -117,7 +117,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         }
 
         LatestVersion = release.Version;
-        ReleaseInfo = $"{release.ReleaseDate} 发布 · {Format.Size(release.Size)}{(release.Prerelease ? " · 预发布" : "")}";
+        ReleaseInfo = $"{release.ReleaseDate} 发布{(release.Size > 0 ? $" · {Format.Size(release.Size)}" : "")}{(release.Prerelease ? " · 预发布" : "")}";
         IsMandatory = release.Mandatory;
         Notes = release.Notes;
         OnPropertyChanged(nameof(Notes));
@@ -152,7 +152,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         Progress = 0;
         StatusText = $"正在下载 {AppInfo.Name} {release.Version}";
         DetailText = $"正在连接 {url.Host}…";
-        var zip = Path.Combine(AppPaths.Downloads, $"CAN-Downloader-{release.Version}.zip");
+        var zip = Path.Combine(AppPaths.Downloads, $"CAN-Downloader-{release.Version}{release.PackageExtension}");
         Log.Info($"开始更新下载器 {AppInfo.Version} → {release.Version}");
 
         try
@@ -199,9 +199,12 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         try
         {
             DetailText = "校验文件";
+            var sha256 = release.Sha256;
+            if (sha256 is null && release.ChecksumsUrl is { } checksums)
+                sha256 = await PackageInstaller.LookupSha256Async(checksums, Path.GetFileName(url.AbsolutePath));
             await Task.Run(() =>
             {
-                if (release.Sha256 is { } sha256)
+                if (sha256 is not null)
                     PackageInstaller.VerifySha256(zip, sha256);
                 PackageInstaller.Verify(zip);
             });

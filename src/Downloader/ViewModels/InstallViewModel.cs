@@ -58,7 +58,7 @@ public sealed partial class InstallViewModel : ViewModelBase
         Components.Where(c => c.IsSelected).Sum(c => c.Size)
         + (InstallDependencies ? _dependencies.Sum(d => d.DownloadSize) : 0);
 
-    public string RequiredText => $"需要 {Format.Size(RequiredBytes)}";
+    public string RequiredText => RequiredBytes > 0 ? $"需要 {Format.Size(RequiredBytes)}" : "";
 
     /// <summary>安装位置所在磁盘的剩余空间。</summary>
     public string AvailableText

@@ -179,51 +179,112 @@ public static class OAuthLogin
         return Current = new OAuthTokens(access, body.RefreshToken, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, body.ExpiresIn)));
     }
 
+    /// <summary>同时处理的回调连接数上限（防止本机程序开大量空连接占用资源），超出的排队等待。</summary>
+    private const int MaxConnections = 8;
+
     /// <summary>
     /// 等待浏览器回调 GET /callback?code=…&amp;state=…，返回授权码。其他请求（如 favicon）回 404 后继续等。
+    /// 连接要并发处理：浏览器常先开一条不发数据的预连接，真正的回调走另一条，逐个处理会被空连接拖住。
+    /// 只有 state 正确的回调才能结束等待，第一个有效回调生效。
     /// </summary>
     private static async Task<string> WaitForCodeAsync(TcpListener listener, string state, CancellationToken ct)
     {
-        while (true)
+        var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var done = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var slots = new SemaphoreSlim(MaxConnections);
+        var accepting = AcceptLoopAsync(listener, state, result, slots, done.Token);
+        try
         {
-            using var client = await listener.AcceptTcpClientAsync(ct);
-            await using var stream = client.GetStream();
-            var target = await ReadRequestTargetAsync(stream, ct);
-            if (target is null || !target.StartsWith(CallbackPath, StringComparison.Ordinal))
-            {
-                await RespondAsync(stream, 404, "Not Found", "", ct);
-                continue;
-            }
-
-            var query = ParseQuery(target.Contains('?') ? target[(target.IndexOf('?') + 1)..] : "");
-            if (query.GetValueOrDefault("state") != state)
-            {
-                // 不是本次登录发起的回调，忽略
-                await RespondAsync(stream, 400, "Bad Request", Page("登录请求无效", "这不是下载器发起的登录，请回到 CAN 下载器重新登录。"), ct);
-                continue;
-            }
-            if (query.GetValueOrDefault("error") is { } error)
-            {
-                await RespondAsync(stream, 200, "OK", Page("未完成登录", "可以关闭这个页面，回到 CAN 下载器。"), ct);
-                throw new ApiException(error, error == "access_denied" ? "已取消授权。" : $"登录失败：{query.GetValueOrDefault("error_description") ?? error}");
-            }
-            if (query.GetValueOrDefault("code") is not { Length: > 0 } code)
-            {
-                await RespondAsync(stream, 400, "Bad Request", Page("登录请求无效", "回调里没有授权码，请回到 CAN 下载器重新登录。"), ct);
-                continue;
-            }
-
-            // 此时还没换到令牌，只说已授权，结果在下载器里显示
-            await RespondAsync(stream, 200, "OK", Page("已授权", "可以关闭这个页面，回到 CAN 下载器继续。"), ct);
-            return code;
+            return await result.Task.WaitAsync(ct);
+        }
+        finally
+        {
+            // 拿到结果后立即停止监听，关闭其余连接
+            done.Cancel();
+            listener.Stop();
+            await accepting;
         }
     }
 
-    /// <summary>读取请求行（GET /callback?... HTTP/1.1）和请求头，返回请求目标。</summary>
+    private static async Task AcceptLoopAsync(TcpListener listener, string state, TaskCompletionSource<string> result,
+        SemaphoreSlim slots, CancellationToken ct)
+    {
+        try
+        {
+            while (true)
+            {
+                // 名额用完时先不接新连接，让它在系统队列里等空连接超时让出名额（不丢掉真正的回调）
+                await slots.WaitAsync(ct);
+                var client = await listener.AcceptTcpClientAsync(ct);
+                _ = HandleConnectionAsync(client, state, result, slots, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 登录结束时停止监听会走到这里；其他情况（监听出错）结束等待
+            if (!ct.IsCancellationRequested)
+                result.TrySetException(ex);
+        }
+    }
+
+    private static async Task HandleConnectionAsync(TcpClient client, string state, TaskCompletionSource<string> result,
+        SemaphoreSlim slots, CancellationToken ct)
+    {
+        try
+        {
+            using (client)
+            {
+                await using var stream = client.GetStream();
+                var target = await ReadRequestTargetAsync(stream, ct);
+                if (target is null || !target.StartsWith(CallbackPath, StringComparison.Ordinal))
+                {
+                    await RespondAsync(stream, 404, "Not Found", "", ct);
+                    return;
+                }
+
+                var query = ParseQuery(target.Contains('?') ? target[(target.IndexOf('?') + 1)..] : "");
+                if (query.GetValueOrDefault("state") != state)
+                {
+                    // 不是本次登录发起的回调，忽略
+                    await RespondAsync(stream, 400, "Bad Request", Page("登录请求无效", "这不是下载器发起的登录，请回到 CAN 下载器重新登录。"), ct);
+                    return;
+                }
+                if (query.GetValueOrDefault("error") is { } error)
+                {
+                    try { await RespondAsync(stream, 200, "OK", Page("未完成登录", "可以关闭这个页面，回到 CAN 下载器。"), ct); }
+                    finally
+                    {
+                        result.TrySetException(new ApiException(error,
+                            error == "access_denied" ? "已取消授权。" : $"登录失败：{query.GetValueOrDefault("error_description") ?? error}"));
+                    }
+                    return;
+                }
+                if (query.GetValueOrDefault("code") is not { Length: > 0 } code)
+                {
+                    await RespondAsync(stream, 400, "Bad Request", Page("登录请求无效", "回调里没有授权码，请回到 CAN 下载器重新登录。"), ct);
+                    return;
+                }
+
+                // 此时还没换到令牌，只说已授权，结果在下载器里显示；页面没发出去（浏览器已断开）也照样继续登录
+                try { await RespondAsync(stream, 200, "OK", Page("已授权", "可以关闭这个页面，回到 CAN 下载器继续。"), ct); }
+                finally { result.TrySetResult(code); }
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
+        {
+            // 连接断开，或登录已结束
+        }
+        finally
+        {
+            slots.Release();
+        }
+    }
+
+    /// <summary>读取请求行（GET /callback?... HTTP/1.1）和请求头，返回请求目标。空连接 5 秒后放弃。</summary>
     private static async Task<string?> ReadRequestTargetAsync(NetworkStream stream, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
         var buffer = new byte[8192];
         var length = 0;
         try
@@ -261,7 +322,7 @@ public static class OAuthLogin
     private static string Page(string title, string message) =>
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>" + WebUtility.HtmlEncode(title) + " - CAN 下载器</title>" +
         "<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#16181c;color:#d7dae0;" +
-        "font:13px 'Segoe UI','Microsoft YaHei',sans-serif}main{text-align:center}h1{font-size:16px;font-weight:600;margin:0 0 8px}" +
+        "font:13px system-ui,-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC','Noto Sans CJK SC',sans-serif}main{text-align:center}h1{font-size:16px;font-weight:600;margin:0 0 8px}" +
         "p{margin:0;color:#8b9098}</style></head><body><main><h1>" + WebUtility.HtmlEncode(title) + "</h1><p>" +
         WebUtility.HtmlEncode(message) + "</p></main></body></html>";
 
