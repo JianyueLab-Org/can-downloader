@@ -20,27 +20,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private UpdateManifest? _manifest;
     private LibraryEntry? _selectedEntry;
 
-    /// <param name="account">已登录的账号；为 null 时是离线模式。</param>
-    public MainWindowViewModel(UpdateManifest? manifest, SettingsViewModel settings, UserAccount? account)
+    /// <param name="manifest">软件清单；为 null（获取失败）时软件库为空，可点“检查更新”重试。</param>
+    /// <param name="account">已登录的账号。</param>
+    public MainWindowViewModel(UpdateManifest? manifest, SettingsViewModel settings, UserAccount account)
     {
         Settings = settings;
         Account = account;
         _timer = new DispatcherTimer(TimeSpan.FromSeconds(TickSeconds), DispatcherPriority.Background, (_, _) => Tick());
 
-        if (account is null)
-        {
-            IsOffline = true;
-            // 离线模式：使用上次缓存的清单，不能下载
-            manifest ??= ManifestSource.LoadCached();
-            Notices.Add(new NoticeViewModel(NoticeKind.Warning, "离线模式：未登录，显示的是上次缓存的软件列表，不能下载或更新。",
-                "登录", () => LoginRequested?.Invoke(this, EventArgs.Empty)));
-        }
-
         if (manifest is not null)
             ApplyManifest(manifest, announce: false);
 
         SelectedEntry = Products.FirstOrDefault(p => p.HasUpdate) ?? Products.FirstOrDefault();
-        LastCheckText = IsOffline ? "未登录" : $"已检查 {DateTime.Now:HH:mm}";
+        LastCheckText = manifest is null ? "" : $"已检查 {DateTime.Now:HH:mm}";
     }
 
     public SettingsViewModel Settings { get; }
@@ -48,27 +40,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// <summary>当前清单，退出登录时交给登录窗口。</summary>
     public UpdateManifest? Manifest => _manifest;
 
-    public UserAccount? Account { get; }
-    public string AccountText => Account is null ? "离线模式" : $"{(Account.Name.Length > 0 ? Account.Name : "CAN 用户")}（{Account.CanId}）";
+    public UserAccount Account { get; }
+    public string AccountText => $"{(Account.Name.Length > 0 ? Account.Name : "CAN 用户")}（{Account.CanId}）";
 
-    /// <summary>退出登录或离线模式下点“登录”：回到登录窗口。</summary>
+    /// <summary>退出登录：回到登录窗口。</summary>
     public event EventHandler? LoginRequested;
 
-    /// <summary>退出登录：停止下载（已下载的部分保留，下次可续传），吊销会话，回到登录窗口。</summary>
+    /// <summary>退出登录：停止下载（已下载的部分保留，下次可续传），吊销 OAuth 授权，回到登录窗口。</summary>
     public async Task LogoutAsync()
     {
         _timer.Stop();
         foreach (var transfer in _transfers.Values)
             transfer.Cts?.Cancel();
-        await CanApi.Shared.SignOutAsync();
-        AccountStore.ForgetSession();
+        await OAuthLogin.SignOutAsync();
+        var account = AccountStore.Load();
+        AccountStore.SaveRefreshToken(account, null);
         Log.Info("退出登录");
         LoginRequested?.Invoke(this, EventArgs.Empty);
     }
-
-    /// <summary>离线模式下检查更新、下载前需要先登录。</summary>
-    [RelayCommand]
-    private void RequestLogin() => LoginRequested?.Invoke(this, EventArgs.Empty);
 
     public string AppVersion => $"v{AppInfo.Version}";
 
@@ -85,12 +74,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>需要主窗口显示的提示（例如找不到要打开的程序）。</summary>
     public event EventHandler<(string Title, string Message)>? MessageRequested;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasProducts), nameof(HasUpdates), nameof(IsOnline))]
-    private bool _isOffline;
-
-    public bool IsOnline => !IsOffline;
 
     [ObservableProperty] private string _searchText = "";
 
@@ -129,8 +112,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     // —— 汇总 ——
     public int UpdateCount => Products.Count(p => p.State == ProductState.UpdateAvailable);
-    /// <summary>离线时不能下载，不显示“全部更新”。</summary>
-    public bool HasUpdates => UpdateCount > 0 && !IsOffline;
+    public bool HasUpdates => UpdateCount > 0;
     public string UpdateAllText => $"全部更新（{UpdateCount}）";
     public string LibrarySummary => $"已安装 {Products.Count(p => p.IsInstalled)} · 共 {Products.Count} 个";
 
@@ -178,7 +160,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 var record = LocalInstalls.Find(item.Id);
                 product = new ProductViewModel(item.Id)
                 {
-                    IsOffline = IsOffline,
                     InstalledVersion = record?.Version,
                     InstallPath = record?.Path ?? DefaultInstallPath(item.Id)
                 };
@@ -296,7 +277,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private bool CanCheckUpdates() => !IsChecking && !IsOffline;
+    private bool CanCheckUpdates() => !IsChecking;
 
     [RelayCommand]
     private void DismissNotice(NoticeViewModel notice) => Notices.Remove(notice);

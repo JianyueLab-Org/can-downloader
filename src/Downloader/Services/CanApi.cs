@@ -6,12 +6,8 @@ using Downloader.ViewModels;
 
 namespace Downloader.Services;
 
-/// <summary>保存在本机的登录会话（<c>can_session</c> cookie）。</summary>
-public sealed record SavedSession(string Token, string Domain, DateTimeOffset? Expires);
-
 /// <summary>
-/// CAN API（https://api.ceruleanavi.net）客户端：登录、会话、客户端发布信息与下载中转。
-/// 会话是 can-api 签发的 <c>can_session</c> cookie，保存在 <see cref="CookieContainer"/> 里，所有请求共用。
+/// CAN API（https://api.ceruleanavi.net）客户端：客户端发布信息、下载中转，以及 OAuth 登录用到的请求（<see cref="OAuthLogin"/>）。
 /// </summary>
 public sealed class CanApi
 {
@@ -24,15 +20,11 @@ public sealed class CanApi
             : new Uri($"https://{ApiHost}/");
     public static readonly Uri WebsiteUri = new("https://ceruleanavi.net/");
     public static string SignUpUrl => new Uri(WebsiteUri, "signup").ToString();
-    public static string ResetPasswordUrl => new Uri(WebsiteUri, "reset").ToString();
-
-    private const string SessionCookie = "can_session";
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static CanApi Shared { get; } = new();
 
-    private readonly CookieContainer _cookies = new();
     private string _configKey = "";
     private HttpClient _http;
     private HttpClient _downloads;
@@ -66,8 +58,7 @@ public sealed class CanApi
         {
             var handler = new SocketsHttpHandler
             {
-                CookieContainer = _cookies,
-                UseCookies = true,
+                UseCookies = false,
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
                 ConnectTimeout = timeout,
                 AutomaticDecompression = decompress ? DecompressionMethods.All : DecompressionMethods.None
@@ -112,85 +103,13 @@ public sealed class CanApi
             throw await ToApiExceptionAsync(response, ct);
     }
 
-    // ========== 登录 ==========
+    // ========== 登录（OAuth，见 OAuthLogin） ==========
 
-    /// <param name="identifier">CAN ID 或邮箱。</param>
-    /// <param name="remember">保持登录：服务器签发长期 cookie。</param>
-    public async Task<ApiUser> SignInAsync(string identifier, string password, bool remember, CancellationToken ct = default)
-    {
-        var response = await PostJsonAsync<SessionResponse>("api/v1/auth/signin", new { identifier, password, remember }, ct);
-        return response.User ?? throw new ApiException("invalid_response", "服务器没有返回账号信息。");
-    }
-
-    /// <summary>发送邮箱验证码。账号不存在时服务器也会返回 requestId，不会提示。</summary>
-    public async Task<string> RequestCodeAsync(string identifier, CancellationToken ct = default)
-    {
-        var response = await PostJsonAsync<CodeRequestResponse>("api/v1/auth/code/request", new { identifier }, ct);
-        return response.RequestId;
-    }
-
-    public async Task<ApiUser> VerifyCodeAsync(string requestId, string code, bool remember, CancellationToken ct = default)
-    {
-        var response = await PostJsonAsync<SessionResponse>("api/v1/auth/code/verify", new { requestId, code, remember }, ct);
-        return response.User ?? throw new ApiException("invalid_response", "服务器没有返回账号信息。");
-    }
-
-    /// <summary>当前会话对应的账号；未登录或会话已失效时返回 null。</summary>
-    public async Task<ApiUser?> GetSessionAsync(CancellationToken ct = default) =>
-        (await SendAsync<SessionResponse>(new HttpRequestMessage(HttpMethod.Get, "api/v1/auth/session"), ct)).User;
-
-    /// <summary>退出登录：服务器吊销本次会话；无论成功与否都清除本机 cookie。</summary>
-    public async Task SignOutAsync()
-    {
-        try
-        {
-            if (CurrentSession is not null)
-                await PostJsonAsync<JsonElement>("api/v1/auth/signout", new { }, CancellationToken.None);
-        }
-        catch (ApiException)
-        {
-            // 网络不通时本机照样退出；服务器上的会话到期后自然失效
-        }
-        finally
-        {
-            ClearSession();
-        }
-    }
-
-    /// <summary>当前的会话 cookie，用于“自动登录”时保存到本机。</summary>
-    public SavedSession? CurrentSession
-    {
-        get
-        {
-            var cookie = _cookies.GetCookies(BaseUri)[SessionCookie];
-            if (cookie is null || cookie.Expired || cookie.Value.Length == 0)
-                return null;
-            return new SavedSession(cookie.Value, cookie.Domain,
-                cookie.Expires == DateTime.MinValue ? null : new DateTimeOffset(cookie.Expires.ToUniversalTime(), TimeSpan.Zero));
-        }
-    }
-
-    public void RestoreSession(SavedSession session)
-    {
-        var cookie = new Cookie(SessionCookie, session.Token, "/", session.Domain) { Secure = true, HttpOnly = true };
-        if (session.Expires is { } expires)
-            cookie.Expires = expires.UtcDateTime;
-        _cookies.Add(cookie);
-    }
-
-    public void ClearSession()
-    {
-        foreach (Cookie cookie in _cookies.GetCookies(BaseUri))
-        {
-            if (cookie.Name == SessionCookie)
-                cookie.Expired = true;
-        }
-    }
+    /// <summary>发送请求并返回原始响应（不检查状态码），网络错误与超时转换成 <see cref="ApiException"/>。调用方释放响应。</summary>
+    public Task<HttpResponseMessage> SendRawAsync(HttpRequestMessage request, CancellationToken ct) =>
+        Send(_http, request, HttpCompletionOption.ResponseContentRead, ct);
 
     // ========== 请求 ==========
-
-    private Task<T> PostJsonAsync<T>(string path, object body, CancellationToken ct) =>
-        SendAsync<T>(new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) }, ct);
 
     private async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken ct)
     {
@@ -257,12 +176,6 @@ public sealed class CanApi
         var retryAfter = response.Headers.RetryAfter?.Delta;
         var message = code switch
         {
-            "invalid_credentials" => "账号或密码错误。",
-            "missing_credentials" => "请输入 CAN ID（或邮箱）和密码。",
-            "missing_identifier" => "请输入 CAN ID 或邮箱。",
-            "missing_code" => "请输入邮件中的验证码。",
-            "code_invalid" => "验证码错误或已过期。",
-            "account_closed" => "该账号已注销。",
             "rate_limited" => retryAfter is { } wait
                 ? $"操作过于频繁，请 {Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds))} 秒后再试。"
                 : "操作过于频繁，请稍后再试。",

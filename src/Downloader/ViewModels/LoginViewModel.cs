@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Downloader.Services;
@@ -14,75 +13,57 @@ public sealed record UserAccount(string CanId, string Name, string? Email, int R
 }
 
 /// <summary>
-/// 登录窗口：检查完下载器更新后显示，登录后才能进入主界面下载；也可以选择离线模式（只能查看缓存的软件列表）。
-/// 支持密码登录（CAN ID 或邮箱 + 密码）和邮箱验证码登录，对应 can-api 的 /api/v1/auth/signin 与 /api/v1/auth/code/*。
-/// 启动时选择了“稍后”的话，这里仍可更新下载器。
+/// 登录窗口：检查完下载器更新后显示，登录后才能进入主界面。
+/// 用 CAN 账号 OAuth 登录（<see cref="OAuthLogin"/>）：在浏览器里打开 CAN 网站登录并授权，下载器不接触密码。
+/// 勾选“自动登录”时把 refresh 令牌加密保存在本机，下次启动直接登录。启动时选择了“稍后”的话，这里仍可更新下载器。
 /// </summary>
 public sealed partial class LoginViewModel : ViewModelBase
 {
-    private const int CodeCooldownSeconds = 60;
+    /// <summary>等待浏览器授权的最长时间。</summary>
+    private static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(10);
 
     private readonly AccountSettings _settings = AccountStore.Load();
-    private readonly DispatcherTimer _cooldownTimer;
-    private string? _requestId;
+    private CancellationTokenSource? _signIn;
 
     public LoginViewModel(UpdateManifest? manifest)
     {
         Manifest = manifest;
         if (manifest?.Launcher is { } launcher && VersionUtil.IsNewer(launcher.Version, AppInfo.Version))
             LauncherUpdateText = $"{AppInfo.Name} {launcher.Version} 已发布（当前 {AppInfo.Version}）";
-
-        _rememberAccount = _settings.RememberAccount;
         _autoLogin = _settings.AutoLogin;
-        _isCodeMode = _settings.UseCodeLogin;
-        _canId = _settings.RememberAccount ? _settings.RememberedId : "";
-
-        _cooldownTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, (_, _) =>
-        {
-            CodeCooldown = Math.Max(0, CodeCooldown - 1);
-            if (CodeCooldown == 0)
-                _cooldownTimer!.Stop();
-        });
     }
 
     /// <summary>
-    /// 启动时的自动登录：勾选了“自动登录”且保存过会话时，向服务器确认会话仍然有效。
-    /// 返回 null 表示需要显示登录窗口（没有保存的会话、会话已失效或无法连接）。
+    /// 启动时的自动登录：用保存的 refresh 令牌换新令牌并读取账号信息。
+    /// 返回 null 表示需要显示登录窗口（没有保存的授权、授权已失效或无法连接）。
     /// </summary>
     public static async Task<UserAccount?> TryResumeAsync()
     {
         var settings = AccountStore.Load();
-        if (!settings.AutoLogin || AccountStore.LoadSession(settings) is not { } session)
+        if (!settings.AutoLogin || AccountStore.LoadRefreshToken(settings) is not { } refreshToken)
             return null;
 
-        CanApi.Shared.RestoreSession(session);
         try
         {
-            if (await CanApi.Shared.GetSessionAsync() is { } user)
-            {
-                Log.Info($"自动登录：{user.Username}");
-                return UserAccount.From(user);
-            }
+            var tokens = await OAuthLogin.RefreshAsync(refreshToken);
+            // refresh 令牌每次都会换新，旧的已作废，必须保存新的
+            AccountStore.SaveRefreshToken(settings, tokens.RefreshToken);
+            var user = await OAuthLogin.GetUserAsync(tokens.AccessToken);
+            Log.Info($"自动登录：{user.Username}");
+            return UserAccount.From(user);
         }
-        catch (ApiException)
+        catch (ApiException ex)
         {
-            // 无法连接时回到登录窗口，由用户决定重试或离线
-            CanApi.Shared.ClearSession();
+            // 授权被撤销或过期时丢掉保存的令牌；网络问题时保留，下次再试
+            if (ex.Code is "invalid_grant" or "invalid_token")
+                AccountStore.SaveRefreshToken(settings, null);
+            Log.Warn($"自动登录失败：{ex.Code}");
             return null;
         }
-
-        // 会话已过期或被吊销（例如修改了密码）
-        Log.Info("自动登录：保存的会话已失效");
-        CanApi.Shared.ClearSession();
-        AccountStore.ForgetSession();
-        return null;
     }
 
     /// <summary>登录成功。</summary>
     public event EventHandler<UserAccount>? LoggedIn;
-
-    /// <summary>离线模式进入主界面。</summary>
-    public event EventHandler? OfflineRequested;
 
     /// <summary>登录前更新下载器：回到启动窗口下载并重启。</summary>
     public event EventHandler? UpdateLauncherRequested;
@@ -95,50 +76,7 @@ public sealed partial class LoginViewModel : ViewModelBase
     public string? LauncherUpdateText { get; }
     public bool HasLauncherUpdate => LauncherUpdateText is not null;
 
-    /// <summary>CAN ID 或邮箱。</summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(SendCodeCommand))]
-    private string _canId;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
-    private string _password = "";
-
-    [ObservableProperty] private bool _rememberAccount;
     [ObservableProperty] private bool _autoLogin;
-
-    // —— 验证码登录 ——
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsPasswordMode), nameof(SwitchModeText))]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
-    private bool _isCodeMode;
-
-    public bool IsPasswordMode => !IsCodeMode;
-    public string SwitchModeText => IsCodeMode ? "改用密码登录" : "改用邮箱验证码登录";
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
-    private string _code = "";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SendCodeText))]
-    [NotifyCanExecuteChangedFor(nameof(SendCodeCommand))]
-    private int _codeCooldown;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SendCodeText))]
-    [NotifyCanExecuteChangedFor(nameof(SendCodeCommand))]
-    private bool _isSendingCode;
-
-    public string SendCodeText => IsSendingCode ? "正在发送…"
-        : CodeCooldown > 0 ? $"{CodeCooldown} 秒后重发"
-        : _requestId is null ? "发送验证码" : "重新发送";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasCodeHint))]
-    private string _codeHintText = "";
-
-    public bool HasCodeHint => CodeHintText.Length > 0;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasError))]
@@ -146,101 +84,73 @@ public sealed partial class LoginViewModel : ViewModelBase
 
     public bool HasError => ErrorText.Length > 0;
 
+    [ObservableProperty] private string _statusText = "";
+
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(LoginButtonText), nameof(IsIdle))]
+    [NotifyPropertyChangedFor(nameof(IsIdle))]
     [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
     private bool _isBusy;
 
     public bool IsIdle => !IsBusy;
-    public string LoginButtonText => IsBusy ? "正在登录…" : "登录";
 
-    [RelayCommand]
-    private void SwitchMode()
-    {
-        IsCodeMode = !IsCodeMode;
-        ErrorText = "";
-    }
-
-    private bool CanSendCode() => !IsSendingCode && CodeCooldown == 0 && CanId.Trim().Length > 0;
-
-    [RelayCommand(CanExecute = nameof(CanSendCode))]
-    private async Task SendCodeAsync()
-    {
-        ErrorText = "";
-        IsSendingCode = true;
-        try
-        {
-            _requestId = await CanApi.Shared.RequestCodeAsync(CanId.Trim());
-            Log.Info("已请求邮箱验证码");
-            // 账号不存在时服务器同样返回成功，不会透露账号是否存在
-            CodeHintText = "如果该账号存在，验证码已发送到绑定的邮箱。";
-            CodeCooldown = CodeCooldownSeconds;
-            _cooldownTimer.Start();
-        }
-        catch (ApiException ex)
-        {
-            ErrorText = ex.Message;
-        }
-        finally
-        {
-            IsSendingCode = false;
-        }
-        LoginCommand.NotifyCanExecuteChanged();
-    }
-
-    private bool CanLogin() => !IsBusy && CanId.Trim().Length > 0
-                                       && (IsCodeMode ? _requestId is not null && Code.Trim().Length > 0 : Password.Length > 0);
-
-    [RelayCommand(CanExecute = nameof(CanLogin))]
+    [RelayCommand(CanExecute = nameof(IsIdle))]
     private async Task LoginAsync()
     {
         ErrorText = "";
-        var id = CanId.Trim();
         IsBusy = true;
+        _signIn = new CancellationTokenSource(SignInTimeout);
+        var token = _signIn.Token;
         try
         {
-            // 勾选“自动登录”时请服务器签发长期会话
-            var user = IsCodeMode
-                ? await CanApi.Shared.VerifyCodeAsync(_requestId!, Code.Trim(), AutoLogin)
-                : await CanApi.Shared.SignInAsync(id, Password, AutoLogin);
+            StatusText = "已在浏览器中打开 CAN 网站，请在网页上登录并授权…";
+            var tokens = await OAuthLogin.SignInAsync(token);
+            StatusText = "正在读取账号信息…";
+            var user = await OAuthLogin.GetUserAsync(tokens.AccessToken, token);
 
-            // 登录后获取软件清单（启动检查失败、从离线模式回来登录时还没有清单）；失败时先用缓存，进入主界面后可重试
+            // 登录后获取软件清单（启动时获取失败的话）；仍然失败时进入主界面后可重试
             if (Manifest is null)
             {
-                try { Manifest = await ManifestSource.FetchAsync(); }
-                catch (ApiException) { Manifest = ManifestSource.LoadCached(); }
+                try { Manifest = await ManifestSource.FetchAsync(token); }
+                catch (ApiException) { /* 主界面显示“检查更新” */ }
             }
 
-            SaveSettings(id);
-            Log.Info($"登录成功：{user.Username}（{(IsCodeMode ? "验证码" : "密码")}，自动登录 {AutoLogin}）");
+            _settings.AutoLogin = AutoLogin;
+            AccountStore.SaveRefreshToken(_settings, AutoLogin ? tokens.RefreshToken : null);
+            Log.Info($"登录成功：{user.Username}（自动登录 {AutoLogin}）");
             LoggedIn?.Invoke(this, UserAccount.From(user));
+        }
+        catch (OperationCanceledException)
+        {
+            ErrorText = _signIn.IsCancellationRequested && !_cancelledByUser ? "等待授权超时，请重新登录。" : "已取消登录。";
         }
         catch (ApiException ex)
         {
             Log.Warn($"登录失败：{ex.Code}");
             ErrorText = ex.Message;
         }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // 打不开浏览器
+            Log.Error("登录：无法打开浏览器", ex);
+            ErrorText = $"无法打开浏览器：{ex.Message}";
+        }
         finally
         {
+            _cancelledByUser = false;
+            _signIn.Dispose();
+            _signIn = null;
+            StatusText = "";
             IsBusy = false;
         }
     }
 
-    private void SaveSettings(string id)
-    {
-        _settings.RememberAccount = RememberAccount || AutoLogin;
-        _settings.RememberedId = _settings.RememberAccount ? id : "";
-        _settings.AutoLogin = AutoLogin;
-        _settings.UseCodeLogin = IsCodeMode;
-        AccountStore.SetSession(_settings, AutoLogin ? CanApi.Shared.CurrentSession : null);
-        AccountStore.Save(_settings);
-    }
+    private bool _cancelledByUser;
 
     [RelayCommand]
-    private void ContinueOffline()
+    private void CancelLogin()
     {
-        Log.Info("进入离线模式");
-        OfflineRequested?.Invoke(this, EventArgs.Empty);
+        _cancelledByUser = true;
+        _signIn?.Cancel();
     }
 
     [RelayCommand]
@@ -248,7 +158,4 @@ public sealed partial class LoginViewModel : ViewModelBase
 
     [RelayCommand]
     private void OpenSignUp() => Shell.Open(CanApi.SignUpUrl);
-
-    [RelayCommand]
-    private void OpenResetPassword() => Shell.Open(CanApi.ResetPasswordUrl);
 }

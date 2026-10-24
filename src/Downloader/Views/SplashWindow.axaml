@@ -25,7 +25,7 @@
     │ · …                                       │
     │                       [稍后] [立即更新]   │
     └──────────────────────────────────────────┘
-    完成后进入登录窗口（LoginWindow）；检查失败时可选离线模式，跳过登录。
+    完成后进入登录窗口（LoginWindow）；检查失败时可重试或退出。
     拖动任意空白处移动窗口。
   -->
   <Border PointerPressed="OnPointerPressed" Background="{DynamicResource Brush.Bg.App}">
@@ -97,8 +97,7 @@
       </Border>
       <Border Classes="footer" IsVisible="{Binding IsFailed}">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="{DynamicResource Space.Sm}">
-          <Button Content="离线模式" MinWidth="72" Command="{Binding ContinueOfflineCommand}"
-                  ToolTip.Tip="不登录进入：只显示上次缓存的软件列表，不能下载或更新" />
+          <Button Content="退出" MinWidth="72" Click="OnCloseClick" />
           <Button Classes="primary" Content="重试" MinWidth="72" Command="{Binding RetryCommand}" />
         </StackPanel>
       </Border>

@@ -107,11 +107,9 @@ public sealed class CatalogEntry
 
 /// <summary>
 /// 清单来源：<c>GET /api/v1/clients/latest</c>（<c>clients</c> 与 <c>apps</c>）加上 catalog.json 里的显示信息。
-/// 每次获取成功后缓存到本机，离线模式显示缓存的软件列表。
 /// </summary>
 public static class ManifestSource
 {
-    private const string CacheFile = "manifest-cache.json";
     private const string OtherCategory = "other";
 
     private static readonly JsonSerializerOptions Options = new()
@@ -127,13 +125,8 @@ public static class ManifestSource
     public static async Task<UpdateManifest> FetchAsync(CancellationToken ct = default)
     {
         var latest = await CanApi.Shared.GetLatestClientsAsync(ct);
-        var manifest = Build(latest, LoadCatalog());
-        LocalData.Save(CacheFile, manifest);
-        return manifest;
+        return Build(latest, LoadCatalog());
     }
-
-    /// <summary>上次获取的清单；没有时返回 null。</summary>
-    public static UpdateManifest? LoadCached() => LocalData.Load<UpdateManifest>(CacheFile);
 
     /// <summary>程序目录下的 catalog.json 优先，没有时用嵌入 exe 的那份。</summary>
     private static Catalog LoadCatalog()

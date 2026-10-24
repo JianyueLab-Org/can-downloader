@@ -6,9 +6,7 @@
 
 | 功能 | API |
 |---|---|
-| 密码登录（CAN ID 或邮箱） | `POST /api/v1/auth/signin` |
-| 邮箱验证码登录 | `POST /api/v1/auth/code/request`、`/api/v1/auth/code/verify` |
-| 自动登录时校验会话 / 退出登录 | `GET /api/v1/auth/session`、`POST /api/v1/auth/signout` |
+| 登录（OAuth 2.1 授权码 + PKCE，公开客户端，在 [platform.ceruleanavi.net](https://platform.ceruleanavi.net/) 注册） | 发现文档 `/.well-known/openid-configuration`；授权页 `https://ceruleanavi.net/oauth/authorize`；`/api/oauth/token`、`/api/oauth/userinfo`、`/api/oauth/revoke` |
 | 软件列表与版本 | `GET /api/v1/clients/latest`：`clients` 是 can-audio 的客户端合集；`apps` 是独立发布的程序（`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明 |
 | 下载器自更新 | `apps.can-downloader`（下载地址同下） |
 | 下载（下载源“本站”） | `GET /api/v1/clients/download/{client}`，支持 Range 续传 |
@@ -20,9 +18,9 @@
 
 | 界面 | 说明 |
 |---|---|
-| 启动窗口 | 打开后先检查下载器自身更新：已是最新则直接进入登录；有新版本时显示更新说明（来自 GitHub 发布说明），可“立即更新”或“稍后”；连接失败可重试或离线模式进入 |
-| 登录窗口 | CAN ID 或邮箱 + 密码，或邮箱验证码；记住账号、自动登录（会话保存在本机，Windows 上用 DPAPI 加密）；注册账号、忘记密码在浏览器中打开 ceruleanavi.net。登录后才能进入主界面下载；也可选“离线模式”，不登录进入，只能查看上次缓存的软件列表 |
-| 主窗口 | 工具栏（检查更新、全部更新、设置；离线时为“登录”）、下载速度汇总、账号菜单（账号信息、退出登录）；提示条报告新上架的软件、可更新的软件、下载器新版本、离线模式 |
+| 启动窗口 | 打开后先检查下载器自身更新：已是最新则直接进入登录；有新版本时显示更新说明（来自 GitHub 发布说明），可“立即更新”或“稍后”；连接失败可重试或退出 |
+| 登录窗口 | “使用 CAN 账号登录”：在浏览器中打开 CAN 网站登录并授权，下载器在 `127.0.0.1` 的随机端口接收回调（不接触密码）；“自动登录”时 refresh 令牌加密保存在本机（Windows 上用 DPAPI），下次启动直接登录；退出登录时吊销授权。没有离线模式，必须登录才能进入主界面 |
+| 主窗口 | 工具栏（检查更新、全部更新、设置）、下载速度汇总、账号菜单（账号信息、退出登录）；提示条报告新上架的软件、可更新的软件、下载器新版本、检查失败 |
 | 软件库 | 左侧按分类分组、可搜索；**软件来自 API 的发布信息**，API 新增客户端后点“检查更新”即自动出现，移除的已安装软件标记“已下架” |
 | 软件详情 | 安装 / 更新 / 打开，下载进度（暂停、继续、取消；暂停后续传），简介、版本信息、更新说明链接；⋯ 菜单：打开目录、校验并修复（重新下载覆盖安装）、卸载 |
 | 安装 | 安装位置（可浏览选择；设置里关闭“安装时询问安装位置”后不显示，直接装到默认目录）、可选组件、同时安装依赖项、所需与可用空间 |
@@ -45,8 +43,8 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 |---|---|
 | `apps/<客户端名>` | 默认安装位置（设置里可改，相对路径按 exe 目录计算） |
 | `downloads/` | 安装包缓存；下载先写 `.part`，暂停或网络中断后用 Range 续传 |
-| `data/` | `settings.json` 设置、`installs.json` 安装记录、`account.json` 记住的账号与自动登录会话、`manifest-cache.json` 离线模式用的软件列表 |
-| `logs/` | 日志，每天一个文件（`2026-10-23.log`）；记录启动、每个 API 请求、登录结果、下载 / 安装 / 卸载、错误。不记录密码、验证码和会话内容 |
+| `data/` | `settings.json` 设置、`installs.json` 安装记录、`account.json` 自动登录选项与加密的 refresh 令牌 |
+| `logs/` | 日志，每天一个文件（`2026-10-23.log`）；记录启动、每个 API 请求、登录结果、下载 / 安装 / 卸载、错误。不记录令牌和授权码 |
 
 不要把下载器放在 `Program Files` 这类需要管理员权限才能写入的目录。
 
@@ -62,7 +60,7 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 
 ```bash
 dotnet run --project src/Downloader
-dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
+dotnet run --project src/Downloader -- --offline   # 演示无法连接 API（启动窗口显示失败与重试）
 ```
 
 ## 自更新
@@ -116,8 +114,8 @@ src/Downloader/
 
 ## 状态
 
-- [x] 自更新、登录 / 离线模式、按清单生成软件库、下载队列的界面
-- [x] CAN 账号登录（密码 / 邮箱验证码、自动登录）
+- [x] 自更新、按清单生成软件库、下载队列的界面
+- [x] CAN 账号 OAuth 登录、自动登录（需要在 platform.ceruleanavi.net 注册下载器，把 client_id 填入 `Services/OAuthLogin.cs`）
 - [x] 从 API 获取软件列表；真实下载（续传、限速、并发、本站 / GitHub 下载源）、校验与安装
 - [x] 下载器自身的更新、CAN Pilot Client（需要 can-api 的 `apps` 部署上线，并配置能读取私有仓库的 `GITHUB_TOKEN`）
 - [ ] can-voice 新一代客户端（`/api/v1/voice/*`，目前还没有发布可安装的构建）

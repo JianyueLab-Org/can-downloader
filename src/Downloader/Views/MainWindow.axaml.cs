@@ -161,8 +161,8 @@ public partial class MainWindow : Window
 
     private async void OnAccountClick(object? sender, RoutedEventArgs e)
     {
-        if (Vm.Account is { } account)
-            await ShowMessageAsync("账号信息", $"姓名：{account.Name}\nCAN ID：{account.CanId}\n邮箱：{account.Email ?? "—"}\n等级：{account.RatingText}");
+        var account = Vm.Account;
+        await ShowMessageAsync("账号信息", $"姓名：{account.Name}\nCAN ID：{account.CanId}\n邮箱：{account.Email ?? "—"}\n等级：{account.RatingText}");
     }
 
     private async void OnLogoutClick(object? sender, RoutedEventArgs e)

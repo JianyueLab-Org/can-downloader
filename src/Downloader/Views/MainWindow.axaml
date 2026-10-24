@@ -37,10 +37,8 @@
       <Border DockPanel.Dock="Top" Classes="toolbar" PointerPressed="OnToolbarPointerPressed">
         <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="{DynamicResource Space.Md}">
           <WrapPanel ItemSpacing="{DynamicResource Space.Sm}" LineSpacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
-            <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}" IsVisible="{Binding IsOnline}"
+            <Button Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}"
                     ToolTip.Tip="重新从 api.ceruleanavi.net 获取发布信息：新上架的软件会自动出现在软件库中" />
-            <!-- 离线模式：登录后才能检查更新与下载 -->
-            <Button Classes="primary" Content="登录" Command="{Binding RequestLoginCommand}" IsVisible="{Binding IsOffline}" />
             <Button Classes="primary" Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}"
                     IsVisible="{Binding HasUpdates}" />
             <Rectangle Classes="vsep" />
@@ -66,7 +64,7 @@
           <!-- 账号：版本号 + 账号菜单（退出登录） -->
           <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="{DynamicResource Space.Sm}" VerticalAlignment="Center">
             <TextBlock Classes="caption mono" VerticalAlignment="Center" Text="{Binding AppVersion}" />
-            <Button Classes="ghost account" Content="{Binding AccountText}" IsVisible="{Binding IsOnline}">
+            <Button Classes="ghost account" Content="{Binding AccountText}">
               <Button.Flyout>
                 <MenuFlyout Placement="BottomEdgeAlignedRight">
                   <MenuItem Header="账号信息" Click="OnAccountClick" />
@@ -167,10 +165,7 @@
 
         <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasProducts}">
           <TextBlock Classes="muted" HorizontalAlignment="Center" Text="没有可用的软件清单" />
-          <Button Classes="primary" HorizontalAlignment="Center" Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}"
-                  IsVisible="{Binding IsOnline}" />
-          <Button Classes="primary" HorizontalAlignment="Center" Content="登录" Command="{Binding RequestLoginCommand}"
-                  IsVisible="{Binding IsOffline}" />
+          <Button Classes="primary" HorizontalAlignment="Center" Content="{Binding CheckButtonText}" Command="{Binding CheckUpdatesCommand}" />
         </StackPanel>
       </Panel>
     </DockPanel>

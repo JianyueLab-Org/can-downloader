@@ -2,7 +2,7 @@ using System.Net;
 
 namespace Downloader.Services;
 
-/// <summary>CAN API 返回的会员信息（<c>/api/v1/auth/session</c>、登录接口的 <c>user</c>）。</summary>
+/// <summary>登录账号的信息，取自 OAuth userinfo（sub、name、email、rating）。</summary>
 public sealed class ApiUser
 {
     /// <summary>CAN ID。</summary>
@@ -11,16 +11,6 @@ public sealed class ApiUser
     public string? Email { get; set; }
     public int Rating { get; set; } = -1;
     public bool EmailVerified { get; set; }
-}
-
-public sealed class SessionResponse
-{
-    public ApiUser? User { get; set; }
-}
-
-public sealed class CodeRequestResponse
-{
-    public string RequestId { get; set; } = "";
 }
 
 /// <summary><c>GET /api/v1/clients/latest</c>：CAN 客户端的最新发布。</summary>

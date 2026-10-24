@@ -72,41 +72,34 @@ public static class LocalData
     }
 }
 
-/// <summary>登录窗口的选项与自动登录用的会话。</summary>
+/// <summary>登录选项与自动登录用的 OAuth refresh 令牌。</summary>
 public sealed class AccountSettings
 {
-    public string RememberedId { get; set; } = "";
-    public bool RememberAccount { get; set; } = true;
-    public bool AutoLogin { get; set; }
-    public bool UseCodeLogin { get; set; }
+    public bool AutoLogin { get; set; } = true;
 
-    /// <summary>会话 cookie。Windows 上用 DPAPI 加密（只有当前用户能解开），其他系统依赖用户目录权限。</summary>
-    public string? Session { get; set; }
-    public string? SessionDomain { get; set; }
-    public DateTimeOffset? SessionExpires { get; set; }
+    /// <summary>refresh 令牌（每次刷新都会换新）。Windows 上用 DPAPI 加密（只有当前用户能解开），其他系统依赖目录权限。</summary>
+    public string? RefreshToken { get; set; }
 }
 
 public static class AccountStore
 {
     private const string FileName = "account.json";
-    private static readonly byte[] Entropy = "CAN-Downloader-session"u8.ToArray();
+    private static readonly byte[] Entropy = "CAN-Downloader-oauth"u8.ToArray();
 
     public static AccountSettings Load() => LocalData.Load<AccountSettings>(FileName) ?? new AccountSettings();
 
     public static void Save(AccountSettings settings) => LocalData.Save(FileName, settings);
 
-    public static SavedSession? LoadSession(AccountSettings settings)
+    public static string? LoadRefreshToken(AccountSettings settings)
     {
-        if (settings.Session is not { Length: > 0 } stored || settings.SessionDomain is not { Length: > 0 } domain)
-            return null;
-        if (settings.SessionExpires is { } expires && expires <= DateTimeOffset.UtcNow)
+        if (settings.RefreshToken is not { Length: > 0 } stored)
             return null;
         try
         {
             var bytes = Convert.FromBase64String(stored);
             if (OperatingSystem.IsWindows())
                 bytes = ProtectedData.Unprotect(bytes, Entropy, DataProtectionScope.CurrentUser);
-            return new SavedSession(Encoding.UTF8.GetString(bytes), domain, settings.SessionExpires);
+            return Encoding.UTF8.GetString(bytes);
         }
         catch (Exception ex) when (ex is FormatException or CryptographicException)
         {
@@ -114,30 +107,20 @@ public static class AccountStore
         }
     }
 
-    /// <summary>保存或清除（<paramref name="session"/> 为 null）会话。</summary>
-    public static void SetSession(AccountSettings settings, SavedSession? session)
+    /// <summary>保存或清除（<paramref name="refreshToken"/> 为 null）refresh 令牌，并写入文件。</summary>
+    public static void SaveRefreshToken(AccountSettings settings, string? refreshToken)
     {
-        if (session is null)
+        if (refreshToken is null)
         {
-            settings.Session = null;
-            settings.SessionDomain = null;
-            settings.SessionExpires = null;
-            return;
+            settings.RefreshToken = null;
         }
-
-        var bytes = Encoding.UTF8.GetBytes(session.Token);
-        if (OperatingSystem.IsWindows())
-            bytes = ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser);
-        settings.Session = Convert.ToBase64String(bytes);
-        settings.SessionDomain = session.Domain;
-        settings.SessionExpires = session.Expires;
-    }
-
-    /// <summary>退出登录：清除保存的会话，保留记住的账号。</summary>
-    public static void ForgetSession()
-    {
-        var settings = Load();
-        SetSession(settings, null);
+        else
+        {
+            var bytes = Encoding.UTF8.GetBytes(refreshToken);
+            if (OperatingSystem.IsWindows())
+                bytes = ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser);
+            settings.RefreshToken = Convert.ToBase64String(bytes);
+        }
         Save(settings);
     }
 }

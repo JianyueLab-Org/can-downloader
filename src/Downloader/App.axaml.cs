@@ -9,10 +9,8 @@ using Downloader.Views;
 namespace Downloader;
 
 /// <summary>
-/// 启动流程：启动窗口（连接 CAN API、检查下载器更新）→ 登录窗口（登录前仍可更新下载器）→ 主界面。
-/// 勾选了“自动登录”且保存的会话仍有效时跳过登录窗口。
-/// 启动检查失败或在登录窗口选择离线模式时，不登录直接进入主界面（不能下载）。
-/// 主界面退出登录、离线模式点“登录”时回到登录窗口；“更新并重启”回到启动窗口。
+/// 启动流程：启动窗口（连接 CAN API、检查下载器更新）→ 登录窗口（OAuth，登录前仍可更新下载器）→ 主界面。
+/// 勾选了“自动登录”且保存的授权仍有效时跳过登录窗口。主界面退出登录时回到登录窗口；“更新并重启”回到启动窗口。
 /// </summary>
 public partial class App : Application
 {
@@ -42,6 +40,8 @@ public partial class App : Application
     {
         _desktop!.MainWindow = next;
         next.Show();
+        // 从浏览器授权回来时把窗口带到前台
+        next.Activate();
         previous?.Close();
     }
 
@@ -52,12 +52,6 @@ public partial class App : Application
         vm.RestartRequested += (_, _) => _desktop!.Shutdown();
         vm.Completed += async (_, manifest) =>
         {
-            if (manifest is null)
-            {
-                ShowMain(null, null, splash);
-                return;
-            }
-
             vm.StatusText = "正在登录…";
             if (await LoginViewModel.TryResumeAsync() is { } account)
                 ShowMain(manifest, account, splash);
@@ -74,13 +68,12 @@ public partial class App : Application
         var vm = new LoginViewModel(manifest);
         var login = new LoginWindow { DataContext = vm };
         vm.LoggedIn += (_, account) => ShowMain(vm.Manifest, account, login);
-        vm.OfflineRequested += (_, _) => ShowMain(vm.Manifest, null, login);
         vm.UpdateLauncherRequested += (_, _) => ShowSplash(offline: false, autoUpdate: true, previous: login);
 
         SwitchTo(login, previous);
     }
 
-    private void ShowMain(UpdateManifest? manifest, UserAccount? account, Window previous)
+    private void ShowMain(UpdateManifest? manifest, UserAccount account, Window previous)
     {
         var vm = new MainWindowViewModel(manifest, _settings, account);
         var main = new MainWindow { DataContext = vm };

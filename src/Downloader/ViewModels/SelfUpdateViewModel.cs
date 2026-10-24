@@ -21,7 +21,7 @@ public enum SelfUpdateStage
 
 /// <summary>
 /// 启动窗口：打开下载器时连接 CAN API 获取软件清单并检查下载器自身的更新（API <c>apps</c> 里的 can-downloader），
-/// 完成（或跳过）后进入登录窗口；无法连接时可离线模式进入主界面。
+/// 完成（或跳过）后进入登录窗口；无法连接时可重试。
 /// 更新：下载新版本、核对 SHA-256，由 <see cref="SelfUpdater"/> 交给新版本替换程序文件并重启。
 /// </summary>
 public sealed partial class SelfUpdateViewModel : ViewModelBase
@@ -38,8 +38,8 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         _autoUpdate = autoUpdate;
     }
 
-    /// <summary>检查流程结束。参数为获取到的清单，进入登录窗口；选择离线模式时为 null，直接进入主界面。</summary>
-    public event EventHandler<UpdateManifest?>? Completed;
+    /// <summary>检查流程结束，参数为获取到的清单，进入登录窗口。</summary>
+    public event EventHandler<UpdateManifest>? Completed;
 
     /// <summary>新版本已启动并会替换程序文件，当前进程应退出。</summary>
     public event EventHandler? RestartRequested;
@@ -112,7 +112,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
             StatusText = "已是最新版本";
             DetailText = $"{AppInfo.Name} {AppInfo.Version}";
             await Task.Delay(300);
-            Completed?.Invoke(this, Manifest);
+            Completed?.Invoke(this, Manifest!);
             return;
         }
 
@@ -250,7 +250,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
 
     /// <summary>暂不更新，进入登录窗口（必需更新时不可用）。</summary>
     [RelayCommand]
-    private void Skip() => Completed?.Invoke(this, Manifest);
+    private void Skip() => Completed?.Invoke(this, Manifest!);
 
     /// <summary>重试。演示：命令行 --offline 模拟的失败只出现一次。</summary>
     [RelayCommand]
@@ -260,7 +260,4 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         return StartAsync();
     }
 
-    /// <summary>无法连接时离线模式进入：不登录，只显示上次缓存的软件列表。</summary>
-    [RelayCommand]
-    private void ContinueOffline() => Completed?.Invoke(this, null);
 }

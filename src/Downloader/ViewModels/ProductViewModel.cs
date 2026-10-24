@@ -109,12 +109,7 @@ public sealed partial class ProductViewModel : LibraryEntry
     public bool HasUpdate => IsInstalled && !IsDelisted && VersionUtil.IsNewer(LatestVersion, InstalledVersion);
     public string InstalledVersionText => InstalledVersion ?? "未安装";
 
-    /// <summary>离线模式下不能下载。</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanDownload))]
-    private bool _isOffline;
-
-    public bool CanDownload => !IsOffline && !IsDelisted && DownloadUrl is not null;
+    public bool CanDownload => !IsDelisted && DownloadUrl is not null;
 
     // —— 状态 ——
     [ObservableProperty]
@@ -185,8 +180,6 @@ public sealed partial class ProductViewModel : LibraryEntry
         ProductState.Installed => Executable is not null,
         _ => true
     };
-
-    partial void OnIsOfflineChanged(bool value) => OnPropertyChanged(nameof(IsPrimaryEnabled));
 
     partial void OnIsDelistedChanged(bool value) => OnPropertyChanged(nameof(IsPrimaryEnabled));
 
@@ -308,7 +301,7 @@ public enum NoticeKind
     Warning
 }
 
-/// <summary>工具栏下方的提示条：清单新增软件、有可用更新、下载器新版本、离线模式等。</summary>
+/// <summary>工具栏下方的提示条：清单新增软件、有可用更新、下载器新版本、检查失败等。</summary>
 public sealed class NoticeViewModel(NoticeKind kind, string text, string? actionText = null, Action? action = null)
 {
     public NoticeKind Kind { get; } = kind;

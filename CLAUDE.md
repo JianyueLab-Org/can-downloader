@@ -9,7 +9,7 @@ CAN 下载器：Avalonia 12.1 + .NET 10，用来安装、更新 CAN 的各个客
 ```bash
 dotnet build                                   # 通过 CanDownloader.slnx 编译，应当 0 警告 0 错误
 dotnet run --project src/Downloader
-dotnet run --project src/Downloader -- --offline   # 演示无法连接 API
+dotnet run --project src/Downloader -- --offline   # 演示无法连接 API（启动窗口失败 → 重试 / 退出）
 dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/win-x64/Downloader.exe（自包含）
 ```
 
@@ -18,15 +18,15 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 | 界面 / 逻辑 | 文件 |
 |---|---|
 | 启动流程：**启动窗口 → 登录窗口 → 主界面**，窗口切换都在 `App.axaml.cs` | |
-| 启动窗口：先检查下载器自身更新（检查中 → 已是最新 / 发现新版本 → 下载 → 安装并重启；失败时 重试 / 离线模式） | `Views/SplashWindow.axaml`，`ViewModels/SelfUpdateViewModel.cs` |
-| 登录窗口：**登录后才能进入主界面**；密码登录或邮箱验证码登录，自动登录时会话加密保存在本机；也可以选离线模式（不登录，只能看缓存的软件列表，不能下载）。主界面离线时工具栏有“登录”，登录后右上角账号菜单可退出登录 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs` |
-| CAN API 客户端（cookie 会话 `can_session`、错误码转中文、代理与超时取自设置） | `Services/CanApi.cs`、`Services/ApiModels.cs` |
+| 启动窗口：先检查下载器自身更新（检查中 → 已是最新 / 发现新版本 → 下载 → 安装并重启；失败时 重试 / 退出） | `Views/SplashWindow.axaml`，`ViewModels/SelfUpdateViewModel.cs` |
+| 登录窗口：**登录后才能进入主界面，没有离线模式**。OAuth 2.1 授权码 + PKCE（公开客户端，在 https://platform.ceruleanavi.net 注册，client_id 是 `OAuthLogin.RegisteredClientId`，环境变量 `CAN_OAUTH_CLIENT_ID` 可覆盖）：浏览器打开授权页，`127.0.0.1` 随机端口收回调（注册的回调地址 `http://127.0.0.1/callback`，端口不参与匹配），scope `openid profile email offline_access`；“自动登录”保存 DPAPI 加密的 refresh 令牌（每次刷新都换新，要保存新的）；退出登录时吊销。下载器不接触密码 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs`，`Services/OAuthLogin.cs` |
+| CAN API 客户端（错误码转中文、代理与超时取自设置；OAuth 请求经 `SendRawAsync`） | `Services/CanApi.cs`、`Services/ApiModels.cs` |
 | 软件清单：由 `GET /api/v1/clients/latest` 生成——`clients`（can-audio 合集，同一版本）加 `apps`（独立发布的 can-pilot 等，各自版本、SHA-256、发布说明）；`apps.can-downloader` 是下载器自己，用于自更新，不进软件库。显示信息（分类、名称、图标、简介）来自 `Assets/catalog.json`。**软件库完全由 API 决定**，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，`Assets/catalog.json` |
 | 自更新：下载 → 核对 SHA-256 → 解压为 `Downloader.exe.new` → 以 `--apply-update <pid>` 启动它并退出 → 新版本复制自己到原位置再启动。**不要在运行中给 exe 改名后继续运行**（单文件程序之后加载程序集会失败） | `Services/SelfUpdater.cs`、`ViewModels/SelfUpdateViewModel.cs` |
 | 下载（续传、限速、本站 / GitHub 下载源）、zip 校验、解压安装、卸载 | `Services/PackageInstaller.cs` |
-| **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、账号、清单缓存）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。不要改回 %LocalAppData% | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
+| **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、自动登录的 refresh 令牌）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。不要改回 %LocalAppData% | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
 | 安装位置：设置里的默认安装目录 + 安装对话框里询问（设置可关闭“安装时询问安装位置”，关闭后没有其他可选项时不弹对话框） | `Views/InstallView.axaml`、`ViewModels/InstallViewModel.cs`、`Views/FolderPicker.cs` |
-| 主界面：工具栏（检查更新、全部更新、设置、⋯、账号）、提示条（新上架、可更新、下载器新版本、离线）、左侧按分类分组的软件库、右侧软件详情与下载进度 | `Views/MainWindow.axaml`、`Views/ProductView.axaml`，`ViewModels/MainWindowViewModel.cs`、`ProductViewModel.cs` |
+| 主界面：工具栏（检查更新、全部更新、设置、⋯、账号）、提示条（新上架、可更新、下载器新版本、检查失败）、左侧按分类分组的软件库、右侧软件详情与下载进度 | `Views/MainWindow.axaml`、`Views/ProductView.axaml`，`ViewModels/MainWindowViewModel.cs`、`ProductViewModel.cs` |
 | 安装对话框（位置、组件、依赖、磁盘空间）、设置（常规 / 下载 / 更新 / 网络） | `Views/InstallView.axaml`、`Views/SettingsWindow.axaml` + `Views/Settings/*.axaml` |
 
 下载在后台线程进行，`MainWindowViewModel` 用 `DispatcherTimer` 把进度刷新到界面；遵守设置里的同时下载数、限速与下载源。设置保存在 `data/settings.json`（`SettingsViewModel` 所有可写公共属性），程序目录内的路径存相对路径；设置窗口“取消”/✕ 会还原。
@@ -67,7 +67,7 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 
 ## 验证方式
 
-没有自动化测试。不要用真实账号密码测试登录（线上服务）。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
+没有自动化测试。不要用真实账号测试登录（线上服务）；OAuth 的本机回调可以用不打开浏览器的方式测试（`OAuthLogin.SignInAsync` 的 openBrowser 参数）。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
 
 ## Git
 
