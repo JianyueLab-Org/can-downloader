@@ -8,6 +8,24 @@ namespace Downloader.Services;
 /// </summary>
 public static class PlatformInfo
 {
+    /// <summary>按实际可执行文件路径检查，包含 .app 内和安装目录内的辅助进程。</summary>
+    public static void ThrowIfRunning(string installDir)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installDir)) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var process in System.Diagnostics.Process.GetProcesses())
+        {
+            using (process)
+            {
+                string? executable;
+                try { executable = process.MainModule?.FileName; }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+                { continue; }
+                if (executable is not null && Path.GetFullPath(executable).StartsWith(root, comparison))
+                    throw new IOException("软件正在运行，请先关闭软件后再更新或修复。");
+            }
+        }
+    }
     public static string Name { get; } =
         OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : "Linux";
 

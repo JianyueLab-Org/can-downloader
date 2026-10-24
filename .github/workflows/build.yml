@@ -74,6 +74,9 @@ jobs:
       - name: 编译
         run: dotnet build CanDownloader.slnx -c Release
 
+      - name: 安装与下载回归测试
+        run: dotnet run --project tests/Downloader.RegressionTests -c Release
+
       - name: 单文件发布
         run: dotnet publish src/Downloader -p:PublishProfile=win-x64
 
@@ -104,6 +107,9 @@ jobs:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
+
+      - name: 安装与下载回归测试
+        run: dotnet run --project tests/Downloader.RegressionTests -c Release
 
       - name: 发布并打包 linux-x64
         run: bash packaging/build.sh linux-x64
@@ -147,6 +153,9 @@ jobs:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
+
+      - name: 安装与下载回归测试
+        run: dotnet run --project tests/Downloader.RegressionTests -c Release
 
       - name: 发布并打包 osx-arm64
         run: bash packaging/build.sh osx-arm64

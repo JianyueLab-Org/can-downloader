@@ -292,8 +292,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     // ========== 下载队列 ==========
 
     /// <summary>一个软件的下载任务。暂停时取消下载、保留 .part 文件，继续时续传。</summary>
-    private sealed class Transfer(ProductTask task, string zipPath)
+    private sealed class Transfer(ProductTask task, ReleaseSnapshot release, string zipPath)
     {
+        public ReleaseSnapshot Release { get; } = release;
         public ProductTask Task { get; } = task;
         public string ZipPath { get; } = zipPath;
         public DownloadProgress Progress { get; } = new();
@@ -353,6 +354,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (product.IsBusy || !product.CanDownload)
             return;
 
+        ReleaseSnapshot release;
+        try
+        {
+            var installed = LocalInstalls.Find(product.Id);
+            PlatformInfo.ThrowIfRunning(installed?.Path ?? product.InstallPath);
+            var url = Settings.UseGitHub ? product.OriginUrl ?? product.DownloadUrl : product.DownloadUrl;
+            release = new ReleaseSnapshot(product.Id, product.LatestVersion, new Uri(CanApi.BaseUri, url!),
+                product.Sha256, product.ChecksumsUrl,
+                Path.GetFileName(new Uri(CanApi.BaseUri, product.OriginUrl ?? product.DownloadUrl!).AbsolutePath),
+                product.DownloadSize, product.PackageExtension, Path.GetFullPath(product.InstallPath));
+        }
+        catch (Exception ex)
+        {
+            Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"无法开始更新 {product.Name}：{ex.Message}"));
+            return;
+        }
+
         product.CurrentTask = task;
         product.TotalBytes = product.DownloadSize;
         product.DownloadedBytes = 0;
@@ -361,7 +379,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         product.PhaseText = TaskTitle(product);
         product.TransferText = "等待其他下载完成";
         product.State = ProductState.Queued;
-        _transfers[product] = new Transfer(task, PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion, product.PackageExtension));
+        _transfers[product] = new Transfer(task, release, release.CachePath(Settings.CacheFolderPath));
 
         Pump();
     }
@@ -390,12 +408,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void Start(ProductViewModel product, Transfer transfer)
     {
         // 下载源：本站中转（默认）或 GitHub 原始地址
-        var url = Settings.UseGitHub && product.OriginUrl is { } origin ? origin : product.DownloadUrl;
-        if (!Uri.TryCreate(CanApi.BaseUri, url, out var uri))
-        {
-            Fail(product, transfer, "下载失败", new InvalidDataException("没有可用的下载地址。"));
-            return;
-        }
+        var uri = transfer.Release.Url;
 
         product.State = ProductState.Downloading;
         product.Speed = 0;
@@ -403,7 +416,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cts = new CancellationTokenSource();
         transfer.Cts = cts;
         transfer.LastBytes = -1;
-        Log.Info($"开始下载 {product.Id} {product.LatestVersion}（{(Settings.UseGitHub ? "GitHub" : "本站")}）→ {transfer.ZipPath}");
+        Log.Info($"开始下载 {transfer.Release.Id} {transfer.Release.Version} → {transfer.ZipPath}");
         transfer.Run = RunAsync(product, transfer, uri, transfer.Run, cts.Token);
     }
 
@@ -418,7 +431,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var expectedSize = product.DownloadSize;
+            var expectedSize = transfer.Release.Size;
             await Task.Run(() => PackageInstaller.DownloadAsync(url, transfer.ZipPath, expectedSize, transfer.Progress,
                 SpeedLimitPerDownload, ct), ct);
         }
@@ -433,9 +446,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        if (ct.IsCancellationRequested || !_transfers.ContainsKey(product))
+        if (ct.IsCancellationRequested || !_transfers.TryGetValue(product, out var current) || !ReferenceEquals(current, transfer))
             return;
-        Log.Info($"下载完成 {product.Id} {product.LatestVersion}（{transfer.Progress.Total} 字节）");
+        Log.Info($"下载完成 {transfer.Release.Id} {transfer.Release.Version}（{transfer.Progress.Total} 字节）");
         product.Speed = 0;
         product.State = ProductState.Installing;
         Pump();
@@ -460,15 +473,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         RefreshSummary();
 
         var zip = transfer.ZipPath;
-        var installDir = product.InstallPath;
+        var release = transfer.Release;
+        var installDir = release.InstallPath;
         try
         {
             // 发布方提供了 SHA-256 时总是核对；“下载完成后校验文件”另外完整读取一遍压缩包
-            var sha256 = product.Sha256;
-            if (sha256 is null && product.ChecksumsUrl is { } checksums && product.DownloadUrl is { } download)
+            var sha256 = release.Sha256;
+            if (sha256 is null && release.ChecksumsUrl is { } checksums)
             {
                 product.PhaseText = "正在获取校验值…";
-                sha256 = await PackageInstaller.LookupSha256Async(checksums, Path.GetFileName(new Uri(download).AbsolutePath));
+                sha256 = await PackageInstaller.LookupSha256Async(checksums, release.ChecksumFileName);
             }
             if (sha256 is not null || Settings.VerifyAfterDownload)
             {
@@ -496,21 +510,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ProductTask.Update => "正在更新…",
                 _ => "正在安装…"
             };
-            var previous = LocalInstalls.Find(product.Id);
-            var files = await Task.Run(() => PackageInstaller.Extract(zip, installDir));
-            if (previous is not null)
-                await Task.Run(() => PackageInstaller.RemoveStale(previous, files, installDir));
-
-            Log.Info($"已安装 {product.Id} {product.LatestVersion} → {installDir}（{files.Count} 个文件）");
-            LocalInstalls.Set(new InstallRecord
-            {
-                Id = product.Id,
-                Version = product.LatestVersion,
-                Path = installDir,
-                Files = files,
-                InstalledAt = DateTimeOffset.Now
-            });
-            product.InstalledVersion = product.LatestVersion;
+            await Task.Run(() => InstallationTransaction.Install(zip, release));
+            Log.Info($"已安装 {release.Id} {release.Version} → {installDir}");
+            product.InstallPath = installDir;
+            product.InstalledVersion = release.Version;
             if (Settings.DeleteCacheAfterInstall)
                 TryDelete(zip);
         }
@@ -622,6 +625,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public void Launch(ProductViewModel product)
     {
+        if (product.IsInstallingState)
+            return;
         var exe = PlatformInfo.FindLaunchTarget(product.InstallPath, product.Executable ?? "");
         if (exe is null)
         {
