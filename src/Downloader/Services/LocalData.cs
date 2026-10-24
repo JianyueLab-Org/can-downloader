@@ -9,18 +9,56 @@ namespace Downloader.Services;
 /// <summary>
 /// 下载器使用的目录，默认都在程序所在目录下（便携，复制整个目录即可带走）：
 /// data（账号、安装记录、设置、清单缓存）、logs（按日期分文件的日志）、downloads（安装包缓存）、apps（默认安装目录）。
+/// macOS 的 .app 包里不能写东西，Linux 用系统包装在 /opt 时程序目录不可写，这两种情况放到用户目录：
+/// ~/Library/Application Support/CAN Downloader、$XDG_DATA_HOME（默认 ~/.local/share）/CAN Downloader。Windows 始终在程序目录。
 /// </summary>
 public static class AppPaths
 {
-    public static string Base { get; } = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+    /// <summary>程序所在目录。</summary>
+    public static string Program { get; } = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+
+    /// <summary>数据目录的根，下面是 data、logs、downloads、apps。设置里的相对路径相对于它。</summary>
+    public static string Base { get; } = ChooseBase();
+
     public static string Data => Path.Combine(Base, "data");
     public static string Logs => Path.Combine(Base, "logs");
     public static string Downloads => Path.Combine(Base, "downloads");
     public static string Apps => Path.Combine(Base, "apps");
 
-    /// <summary>设置里填的目录：展开环境变量，相对路径按程序目录解析。</summary>
-    public static string Resolve(string path) =>
-        Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()), Base);
+    /// <summary>设置里填的目录：展开环境变量和 ~，相对路径按数据目录解析。</summary>
+    public static string Resolve(string path)
+    {
+        path = Environment.ExpandEnvironmentVariables(path.Trim());
+        if (!OperatingSystem.IsWindows() && (path == "~" || path.StartsWith("~/", StringComparison.Ordinal)))
+            path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + path[1..];
+        return Path.GetFullPath(path, Base);
+    }
+
+    public static bool IsWritable(string directory)
+    {
+        try
+        {
+            var probe = Path.Combine(directory, $".write-test-{Environment.ProcessId}");
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string ChooseBase()
+    {
+        if (OperatingSystem.IsWindows() || PlatformInfo.MacAppBundle is null && IsWritable(Program))
+            return Program;
+        // .NET 在 macOS 上是 ~/Library/Application Support，Linux 上是 $XDG_DATA_HOME 或 ~/.local/share
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create);
+        var directory = Path.Combine(root, "CAN Downloader");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
 }
 
 /// <summary>下载器在本机保存的数据：程序目录下 data 里的 JSON 文件。</summary>
@@ -58,10 +96,25 @@ public static class LocalData
     {
         try
         {
-            Directory.CreateDirectory(Root);
             var path = Path.Combine(Root, name);
             var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(value, Json));
+            if (OperatingSystem.IsWindows())
+            {
+                Directory.CreateDirectory(Root);
+                File.WriteAllText(temp, JsonSerializer.Serialize(value, Json));
+            }
+            else
+            {
+                // 账号文件里有 refresh 令牌，macOS / Linux 上没有 DPAPI，只让当前用户读写
+                Directory.CreateDirectory(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                using (var file = new FileStream(temp, new FileStreamOptions
+                       {
+                           Mode = FileMode.Create, Access = FileAccess.Write,
+                           UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                       }))
+                using (var writer = new StreamWriter(file))
+                    writer.Write(JsonSerializer.Serialize(value, Json));
+            }
             File.Move(temp, path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -77,7 +130,7 @@ public sealed class AccountSettings
 {
     public bool AutoLogin { get; set; } = true;
 
-    /// <summary>refresh 令牌（每次刷新都会换新）。Windows 上用 DPAPI 加密（只有当前用户能解开），其他系统依赖目录权限。</summary>
+    /// <summary>refresh 令牌（每次刷新都会换新）。Windows 上用 DPAPI 加密（只有当前用户能解开），macOS / Linux 上文件权限为只有当前用户可读写（600）。</summary>
     public string? RefreshToken { get; set; }
 }
 

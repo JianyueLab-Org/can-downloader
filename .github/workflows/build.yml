@@ -1,8 +1,14 @@
-# 编译与发布
-# - 推送到 main、提交 PR：编译检查，并把单文件 exe 作为构建产物上传（保留 14 天）
-# - 推送 tag v<版本号>（与 Downloader.csproj 的 <Version> 一致）：单文件发布，打包 zip 上传到同名 GitHub Release
+# 编译与发布（Windows、macOS、Linux）
+# - 推送到 main、提交 PR：三个平台都编译、打包，并在 macOS / Linux / Arch 上真正启动一次（冒烟测试），安装包作为构建产物上传（保留 14 天）
+# - 推送 tag v<版本号>（与 Downloader.csproj 的 <Version> 一致）：另外把全部安装包和 SHA256SUMS 上传到同名 GitHub Release
 #   （Release 不存在时自动创建；已手动创建并写好发布说明时只上传 / 覆盖安装包，不改说明）
 # - 也可在 Actions 页面手动运行（不发布 Release）
+#
+# 安装包（文件名中的平台标识与 can-pilot 一致，下载器按它挑本机的安装包，见 ViewModels/Manifest.cs）：
+#   CAN-Downloader-<版本>-win-x64.zip          只含 Downloader.exe
+#   CAN-Downloader-<版本>-osx-universal.zip    CAN Downloader.app（Apple Silicon 和 Intel 通用）
+#   CAN-Downloader-<版本>-linux-x64.tar.gz     can-downloader/（Downloader、install.sh、菜单项），任何 glibc 发行版
+#   can-downloader-bin-<版本>-1-x86_64.pkg.tar.zst 与 PKGBUILD   Arch Linux
 name: Build
 
 on:
@@ -25,35 +31,46 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 
 jobs:
-  build:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # 版本号唯一来源是 Downloader.csproj；推送 tag 时必须与之一致，否则自更新会反复提示新版本
+      - name: 读取版本号
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(dotnet msbuild src/Downloader/Downloader.csproj -getProperty:Version | tr -d '[:space:]')
+          if [ -z "$version" ]; then echo "::error::无法从 Downloader.csproj 读取版本号"; exit 1; fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 Downloader.csproj 的版本号 ${version} 不一致（应为 v${version}）"
+            exit 1
+          fi
+          echo "版本号 ${version}"
+
+  windows:
+    needs: version
     runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
-
       - uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
-
-      # 版本号唯一来源是 Downloader.csproj；推送 tag 时必须与之一致，否则自更新会反复提示新版本
-      - name: 读取版本号
-        id: version
-        run: |
-          $version = (dotnet msbuild src/Downloader/Downloader.csproj -getProperty:Version).Trim()
-          if (-not $version) { throw '无法从 Downloader.csproj 读取版本号' }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "tag $env:GITHUB_REF_NAME 与 Downloader.csproj 的版本号 $version 不一致（应为 v$version）"
-          }
-          Write-Host "版本号 $version"
 
       - name: 编译
         run: dotnet build CanDownloader.slnx -c Release
@@ -63,39 +80,211 @@ jobs:
 
       # 安装包是只含 Downloader.exe 的 zip，自更新从中取出 Downloader.exe
       - name: 打包
-        id: package
         run: |
-          $zip = "CAN-Downloader-${{ steps.version.outputs.version }}-win-x64.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $zip = "dist/CAN-Downloader-${{ needs.version.outputs.version }}-win-x64.zip"
           Compress-Archive -Path publish/win-x64/Downloader.exe -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          $size = (Get-Item $zip).Length
-          "zip=$zip" >> $env:GITHUB_OUTPUT
-          "### $zip`n`n- 大小：$size 字节`n- SHA-256：``$hash``" >> $env:GITHUB_STEP_SUMMARY
-          Write-Host "$zip  $size 字节  SHA-256 $hash"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CAN-Downloader-${{ steps.version.outputs.version }}-win-x64
-          path: publish/win-x64/Downloader.exe
+          name: CAN-Downloader-win-x64
+          path: dist/*
+          if-no-files-found: error
           retention-days: 14
 
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: 发布并打包 linux-x64
+        run: bash packaging/build.sh linux-x64
+
+      - name: 启动冒烟测试
+        # 解压真正的安装包，在虚拟 X 显示器里启动（--offline：不连 API，停在“无法连接”），30 秒内退出就算启动失败
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq xvfb >/dev/null
+          smoke="${RUNNER_TEMP}/smoke"
+          mkdir -p "$smoke"
+          tar -xzf "dist/CAN-Downloader-${{ needs.version.outputs.version }}-linux-x64.tar.gz" -C "$smoke"
+          set +e
+          (cd "${smoke}/can-downloader" && xvfb-run -a timeout 30 ./Downloader --offline)
+          code=$?
+          set -e
+          cat "${smoke}"/can-downloader/logs/*.log || true
+          if [ "$code" -ne 124 ]; then
+            echo "::error::Linux 版启动后 30 秒内就退出了（退出码 ${code}），见上面的日志"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CAN-Downloader-linux-x64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    # 分别发布 osx-arm64、osx-x64，合成一个通用的 CAN Downloader.app（packaging/macos/make-app.sh）
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: 发布并打包 osx-universal
+        run: bash packaging/build.sh osx-universal
+
+      - name: 启动冒烟测试（Apple Silicon 原生 + Rosetta 跑 Intel 版）
+        # 用副本跑，30 秒内退出就算启动失败；日志写在 ~/Library/Application Support/CAN Downloader/logs
+        run: |
+          set -euo pipefail
+          app="${RUNNER_TEMP}/CAN Downloader.app"
+          cp -R "dist/CAN Downloader.app" "$app"
+          logs="${HOME}/Library/Application Support/CAN Downloader/logs"
+          smoke() {
+            local label=$1; shift
+            "$@" --offline &
+            local pid=$!
+            sleep 30
+            if kill -0 "$pid" 2>/dev/null; then
+              kill "$pid"; wait "$pid" 2>/dev/null || true
+              echo "${label}：30 秒后仍在运行"
+            else
+              set +e; wait "$pid"; local code=$?; set -e
+              cat "$logs"/*.log 2>/dev/null || true
+              echo "::error::macOS ${label} 启动后 30 秒内就退出了（退出码 ${code}），见上面的日志"
+              exit 1
+            fi
+          }
+          smoke "arm64" "${app}/Contents/MacOS/Downloader"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            smoke "x64（Rosetta）" arch -x86_64 "${app}/Contents/MacOS/Downloader"
+          else
+            echo "::warning::这台 runner 没有 Rosetta，跳过 Intel 版启动测试"
+          fi
+          cat "$logs"/*.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CAN-Downloader-osx-universal
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  arch:
+    # Arch Linux 的 pacman 包：用上面的 linux-x64 tar.gz 和 packaging/arch/PKGBUILD 跑 makepkg，
+    # 再用 pacman 装上（同时检查依赖写得对不对）并启动一次。填好版本和校验和的 PKGBUILD 一起发出去，可以直接拿去发 AUR。
+    needs: [version, linux]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: CAN-Downloader-linux-x64
+          path: tarball
+
+      - name: makepkg
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          work=/home/builder/pkg
+          mkdir -p "$work" out
+          tarball="tarball/CAN-Downloader-${VERSION}-linux-x64.tar.gz"
+          # makepkg 在 PKGBUILD 旁边找到同名源文件就不下载
+          cp "$tarball" "$work/"
+          sum=$(sha256sum "$tarball" | cut -d' ' -f1)
+          sed -e "s/^pkgver=.*/pkgver=${VERSION}/" -e "s/^sha256sums=.*/sha256sums=('${sum}')/" \
+            packaging/arch/PKGBUILD > "$work/PKGBUILD"
+          chown -R builder "$work"
+          su builder -c "cd '$work' && makepkg --nodeps --noconfirm"
+          cp "$work"/*.pkg.tar.zst "$work/PKGBUILD" out/
+          ls -la out
+
+      - name: 安装并启动冒烟测试
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed xorg-server-xvfb >/dev/null
+          pacman -U --noconfirm out/*.pkg.tar.zst
+          set +e
+          su builder -c "xvfb-run -a timeout 30 can-downloader --offline"
+          code=$?
+          set -e
+          cat "/home/builder/.local/share/CAN Downloader/logs/"*.log || true
+          if [ "$code" -ne 124 ]; then
+            echo "::error::Arch 包装好后启动 30 秒内就退出了（退出码 ${code}），见上面的日志"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CAN-Downloader-arch
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, windows, linux, macos, arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: CAN-Downloader-*
+          path: packages
+          merge-multiple: true
+
+      # 其他平台的下载器在 API 没有给出本平台安装包时，从同一发布的 SHA256SUMS 查 SHA-256 核对
+      - name: 生成 SHA256SUMS
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          sha256sum *.zip *.tar.gz *.pkg.tar.zst > SHA256SUMS
+          cat SHA256SUMS
+          {
+            echo '### 安装包'
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 上传到 GitHub Release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-          ZIP: ${{ steps.package.outputs.zip }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $env:ZIP --clobber
-            if ($LASTEXITCODE -ne 0) { throw "上传 Release 失败" }
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          files=(packages/*.zip packages/*.tar.gz packages/*.pkg.tar.zst packages/PKGBUILD packages/SHA256SUMS)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
             # 0.x 是预发布；1.0.0 起为正式版，标为正式版与最新版
-            if (-not $env:VERSION.StartsWith('0.')) { gh release edit $tag --prerelease=false --latest }
-          } elseif ($env:VERSION.StartsWith('0.')) {
-            gh release create $tag $env:ZIP --title "CAN 下载器 $env:VERSION" --generate-notes --verify-tag --prerelease
-          } else {
-            gh release create $tag $env:ZIP --title "CAN 下载器 $env:VERSION" --generate-notes --verify-tag --latest
-          }
-          if ($LASTEXITCODE -ne 0) { throw "上传 Release 失败" }
+            if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false --latest; fi
+          elif [[ "$VERSION" == 0.* ]]; then
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --prerelease
+          else
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest
+          fi

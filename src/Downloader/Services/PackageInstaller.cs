@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
 
@@ -22,13 +23,16 @@ public sealed class DownloadProgress
     internal void Add(long bytes) => Interlocked.Add(ref _downloaded, bytes);
 }
 
-/// <summary>安装包的下载（断点续传、限速）、校验、解压与卸载。CAN 客户端的安装包是 zip，里面是一个与软件同名的目录。</summary>
+/// <summary>
+/// 安装包的下载（断点续传、限速）、校验、解压与卸载。CAN 客户端的安装包是 zip（Linux 版是 tar.gz），
+/// 里面是一个与软件同名的目录；macOS 版是 zip 里的 .app 包。
+/// </summary>
 public static class PackageInstaller
 {
     private const int BufferSize = 81920;
 
-    public static string CachePath(string cacheFolder, string id, string version) =>
-        Path.Combine(cacheFolder, $"{id}-{version}.zip");
+    public static string CachePath(string cacheFolder, string id, string version, string extension = ".zip") =>
+        Path.Combine(cacheFolder, $"{id}-{version}{extension}");
 
     public static string PartialPath(string zipPath) => zipPath + ".part";
 
@@ -124,10 +128,48 @@ public static class PackageInstaller
         }
     }
 
-    /// <summary>完整读取每个文件，确认压缩包没有损坏。损坏时抛出 <see cref="InvalidDataException"/>。</summary>
-    public static void Verify(string zipPath)
+    /// <summary>
+    /// 从发布附带的 SHA256SUMS（sha256sum 的输出格式）里查出 <paramref name="fileName"/> 的 SHA-256。
+    /// 没有清单、下载失败或清单里没有这个文件时返回 null（照常安装，只是不核对）。
+    /// </summary>
+    public static async Task<string?> LookupSha256Async(string checksumsUrl, string fileName, CancellationToken ct = default)
     {
-        using var zip = ZipFile.OpenRead(zipPath);
+        try
+        {
+            using var response = await CanApi.Shared.GetDownloadAsync(new Uri(checksumsUrl), 0, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
+            foreach (var line in text.Split('\n'))
+            {
+                var fields = line.Trim().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
+                if (fields.Length == 2 && fields[0].Length == 64
+                    && Path.GetFileName(fields[1].Trim().TrimStart('*')) == fileName)
+                    return fields[0].ToLowerInvariant();
+            }
+            Log.Warn($"{checksumsUrl} 里没有 {fileName}，不核对 SHA-256");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or UriFormatException)
+        {
+            Log.Warn($"读取 {checksumsUrl} 失败，不核对 SHA-256：{ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>完整读取每个文件，确认压缩包没有损坏。损坏时抛出 <see cref="InvalidDataException"/>。</summary>
+    public static void Verify(string packagePath)
+    {
+        if (IsGzip(packagePath))
+        {
+            try
+            {
+                ReadTar(packagePath, entry => entry.DataStream?.CopyTo(Stream.Null));
+            }
+            catch (Exception ex) when (ex is FormatException or EndOfStreamException)
+            {
+                throw new InvalidDataException($"安装包已损坏：{ex.Message}", ex);
+            }
+            return;
+        }
+        using var zip = ZipFile.OpenRead(packagePath);
         foreach (var entry in zip.Entries)
         {
             if (entry.FullName.EndsWith('/'))
@@ -138,38 +180,109 @@ public static class PackageInstaller
     }
 
     /// <summary>
-    /// 解压到 <paramref name="installDir"/>，覆盖同名文件；压缩包只有一个顶层目录时去掉这一层。
-    /// 返回解压出的文件（相对安装目录）。
+    /// 解压 zip 或 tar.gz 到 <paramref name="installDir"/>，覆盖同名文件；压缩包只有一个顶层目录时去掉这一层
+    /// （macOS 的 X.app 除外，整个包保留）。保留 macOS / Linux 的可执行权限。返回解压出的文件（相对安装目录）。
     /// </summary>
-    public static List<string> Extract(string zipPath, string installDir)
+    public static List<string> Extract(string packagePath, string installDir)
     {
-        using var zip = ZipFile.OpenRead(zipPath);
-        var prefix = CommonTopFolder(zip.Entries);
         var root = Path.GetFullPath(installDir);
         var rootWithSeparator = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
         Directory.CreateDirectory(root);
-
         var files = new List<string>();
-        foreach (var entry in zip.Entries)
+
+        // 返回文件的目标路径；目录（直接创建）和要跳过的条目返回 null
+        string? Destination(string name, string prefix)
         {
-            var relative = entry.FullName[prefix.Length..].Replace('\\', '/');
+            var normalized = Normalize(name);
+            if (IsMacMetadata(normalized))
+                return null;
+            var relative = normalized.StartsWith(prefix, StringComparison.Ordinal) ? normalized[prefix.Length..] : normalized;
             if (relative.Length == 0)
-                continue;
+                return null;
             var destination = Path.GetFullPath(Path.Combine(root, relative));
             // 防止压缩包里的 ../ 写到安装目录之外
             if (!destination.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"安装包包含非法路径：{entry.FullName}");
-
+                throw new InvalidDataException($"安装包包含非法路径：{name}");
             if (relative.EndsWith('/'))
             {
                 Directory.CreateDirectory(destination);
-                continue;
+                return null;
             }
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            entry.ExtractToFile(destination, overwrite: true);
             files.Add(relative);
+            return destination;
+        }
+
+        if (IsGzip(packagePath))
+        {
+            var names = new List<string>();
+            ReadTar(packagePath, entry => names.Add(entry.Name));
+            var prefix = CommonTopFolder(names);
+            ReadTar(packagePath, entry =>
+            {
+                switch (entry.EntryType)
+                {
+                    case TarEntryType.Directory:
+                        Destination(entry.Name.TrimEnd('/') + "/", prefix);
+                        break;
+                    case TarEntryType.RegularFile or TarEntryType.V7RegularFile or TarEntryType.ContiguousFile:
+                        if (Destination(entry.Name, prefix) is { } destination)
+                            entry.ExtractToFile(destination, overwrite: true);
+                        break;
+                    default:
+                        // 链接、设备文件等不安装
+                        Log.Warn($"跳过安装包里的 {entry.EntryType}：{entry.Name}");
+                        break;
+                }
+            });
+            return files;
+        }
+
+        using var zip = ZipFile.OpenRead(packagePath);
+        var zipPrefix = CommonTopFolder(zip.Entries.Select(e => e.FullName));
+        foreach (var entry in zip.Entries)
+        {
+            // .NET 在 macOS / Linux 上解压时按 zip 里记录的权限设置文件权限
+            if (Destination(entry.FullName, zipPrefix) is { } destination)
+                entry.ExtractToFile(destination, overwrite: true);
         }
         return files;
+    }
+
+    private static bool IsGzip(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return stream.ReadByte() == 0x1F && stream.ReadByte() == 0x8B;
+    }
+
+    private static void ReadTar(string path, Action<TarEntry> action)
+    {
+        using var file = File.OpenRead(path);
+        using var gzip = new GZipStream(file, CompressionMode.Decompress);
+        using var reader = new TarReader(gzip);
+        while (reader.GetNextEntry() is { } entry)
+        {
+            if (entry.EntryType is TarEntryType.GlobalExtendedAttributes or TarEntryType.ExtendedAttributes)
+                continue;
+            action(entry);
+        }
+    }
+
+    private static string Normalize(string name)
+    {
+        name = name.Replace('\\', '/');
+        while (name.StartsWith("./", StringComparison.Ordinal))
+            name = name[2..];
+        return name;
+    }
+
+    /// <summary>macOS 打包时可能带上的元数据（__MACOSX/、._ 开头的文件、.DS_Store），不安装。</summary>
+    private static bool IsMacMetadata(string relative)
+    {
+        if (relative.StartsWith("__MACOSX/", StringComparison.Ordinal))
+            return true;
+        var name = Path.GetFileName(relative.TrimEnd('/'));
+        return name.StartsWith("._", StringComparison.Ordinal) || name == ".DS_Store";
     }
 
     /// <summary>更新或修复后：删除旧版本有、新版本没有的文件。</summary>
@@ -206,12 +319,15 @@ public static class PackageInstaller
         }
     }
 
-    private static string CommonTopFolder(IReadOnlyCollection<ZipArchiveEntry> entries)
+    /// <summary>所有条目共同的顶层目录（带结尾的 /）；没有共同的顶层目录，或它是 macOS 的 .app 包时返回空串。</summary>
+    private static string CommonTopFolder(IEnumerable<string> names)
     {
         string? top = null;
-        foreach (var entry in entries)
+        foreach (var raw in names)
         {
-            var name = entry.FullName.Replace('\\', '/');
+            var name = Normalize(raw);
+            if (name.Length == 0 || IsMacMetadata(name))
+                continue;
             var slash = name.IndexOf('/');
             if (slash <= 0)
                 return "";
@@ -221,11 +337,11 @@ public static class PackageInstaller
             else if (!string.Equals(top, folder, StringComparison.Ordinal))
                 return "";
         }
-        return top ?? "";
+        return top is null || top.EndsWith(".app/", StringComparison.OrdinalIgnoreCase) ? "" : top;
     }
 }
 
-/// <summary>用系统默认方式打开网址、文件夹或程序。</summary>
+/// <summary>用系统默认方式打开网址、文件夹或程序（Windows 是 ShellExecute，macOS 是 open，Linux 是 xdg-open）。</summary>
 public static class Shell
 {
     public static void Open(string target, string? workingDirectory = null)
@@ -234,5 +350,20 @@ public static class Shell
         if (workingDirectory is not null)
             info.WorkingDirectory = workingDirectory;
         Process.Start(info)?.Dispose();
+    }
+
+    /// <summary>
+    /// 启动已安装的程序。macOS 的 .app 包用 open 打开；macOS / Linux 的程序文件直接运行
+    /// （交给 xdg-open 会被当成普通文件），运行前补上可执行权限。
+    /// </summary>
+    public static void Launch(string target, string workingDirectory)
+    {
+        if (OperatingSystem.IsWindows() || Directory.Exists(target))
+        {
+            Open(target, workingDirectory);
+            return;
+        }
+        PlatformInfo.EnsureExecutable(target);
+        Process.Start(new ProcessStartInfo(target) { UseShellExecute = false, WorkingDirectory = workingDirectory })?.Dispose();
     }
 }

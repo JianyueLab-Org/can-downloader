@@ -27,9 +27,13 @@ public sealed class LauncherRelease
     public bool Mandatory { get; set; }
     public bool Prerelease { get; set; }
     public List<string> Notes { get; set; } = [];
-    /// <summary>新版下载器安装包（zip，内含 Downloader.exe）的下载地址与 SHA-256。</summary>
+    /// <summary>本机平台的新版下载器安装包（Windows 是内含 Downloader.exe 的 zip）的下载地址与 SHA-256。</summary>
     public string? DownloadUrl { get; set; }
     public string? Sha256 { get; set; }
+    /// <summary>没有 SHA-256 时，同一发布附带的 SHA256SUMS 地址（下载后从中查出本安装包的 SHA-256 核对）。</summary>
+    public string? ChecksumsUrl { get; set; }
+    /// <summary>安装包扩展名（.zip / .tar.gz），用于下载缓存的文件名。</summary>
+    public string PackageExtension { get; set; } = ".zip";
 }
 
 public sealed class ManifestCategory
@@ -61,6 +65,10 @@ public sealed class ManifestProduct
     public string? NotesUrl { get; set; }
     /// <summary>安装包的 SHA-256；有的话下载后核对。</summary>
     public string? Sha256 { get; set; }
+    /// <summary>没有 SHA-256 时，同一发布附带的 SHA256SUMS 地址（下载后从中查出本安装包的 SHA-256 核对）。</summary>
+    public string? ChecksumsUrl { get; set; }
+    /// <summary>安装包扩展名（.zip / .tar.gz），用于下载缓存的文件名。</summary>
+    public string PackageExtension { get; set; } = ".zip";
     /// <summary>预发布版本。</summary>
     public bool Prerelease { get; set; }
     /// <summary>依赖的其他软件 Id。</summary>
@@ -156,15 +164,17 @@ public static class ManifestSource
         var entries = catalog.Products.ToDictionary(p => p.Id);
         var order = catalog.Products.Select(p => p.Id).ToList();
 
-        // CAN 客户端合集（同一个版本）与独立发布的程序（各自的版本）
-        var bundle = latest.Clients.Select(c => Product(c.Key, entries.GetValueOrDefault(c.Key),
-            c.Value.Version.Length > 0 ? c.Value.Version : latest.Version, latest.PublishedAt, c.Value.Size,
-            c.Value.Download, c.Value.Origin, latest.Notes, sha256: null, prerelease: false, changelog: null));
-        var apps = latest.Apps.Where(a => a.Key != LauncherAppId).Select(a => Product(a.Key, entries.GetValueOrDefault(a.Key),
-            a.Value.Version, a.Value.PublishedAt, a.Value.Size, a.Value.Download, a.Value.Origin, a.Value.Notes,
-            a.Value.Sha256, a.Value.Prerelease, a.Value.Changelog));
+        // CAN 客户端合集（同一个版本）与独立发布的程序（各自的版本）。没有本机平台安装包的软件不列出
+        var bundle = latest.Clients.Select(c => Package(c.Key, c.Value.Download, c.Value.Origin, c.Value.Size, null, c.Value.Platforms)
+            is not { } package ? null : Product(c.Key, entries.GetValueOrDefault(c.Key),
+            c.Value.Version.Length > 0 ? c.Value.Version : latest.Version, latest.PublishedAt, package,
+            latest.Notes, prerelease: false, changelog: null));
+        var apps = latest.Apps.Where(a => a.Key != LauncherAppId).Select(a =>
+            Package(a.Key, a.Value.Download, a.Value.Origin, a.Value.Size, a.Value.Sha256, a.Value.Platforms)
+            is not { } package ? null : Product(a.Key, entries.GetValueOrDefault(a.Key),
+            a.Value.Version, a.Value.PublishedAt, package, a.Value.Notes, a.Value.Prerelease, a.Value.Changelog));
 
-        var products = bundle.Concat(apps)
+        var products = bundle.Concat(apps).OfType<ManifestProduct>()
             .OrderBy(p => order.IndexOf(p.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(p => p.Id, StringComparer.Ordinal)
             .ToList();
@@ -177,15 +187,58 @@ public static class ManifestSource
         {
             PublishedAt = published,
             Server = CanApi.ApiHost,
-            Launcher = latest.Apps.GetValueOrDefault(LauncherAppId) is { } launcher ? Launcher(launcher) : null,
+            Launcher = latest.Apps.GetValueOrDefault(LauncherAppId) is { } launcher
+                       && Package(LauncherAppId, launcher.Download, launcher.Origin, launcher.Size, launcher.Sha256, launcher.Platforms) is { } package
+                ? Launcher(launcher, package)
+                : null,
             Categories = categories,
             Products = products
         };
     }
 
-    private static ManifestProduct Product(string id, CatalogEntry? entry, string version, DateTimeOffset? publishedAt,
-        long size, string download, string? origin, string? notesUrl, string? sha256, bool prerelease, string? changelog)
+    /// <summary>某个平台的安装包。</summary>
+    private sealed record PackageSource(string Download, string? Origin, long Size, string? Sha256, string? ChecksumsUrl, string Extension);
+
+    /// <summary>Windows 版安装包文件名的结尾，其他平台的文件名把它换成自己的平台标识（与 can-pilot、下载器自己的发布一致）。</summary>
+    private const string WindowsSuffix = "-win-x64.zip";
+
+    /// <summary>
+    /// 本机用的安装包。API 给出 <c>platforms</c> 时按 <see cref="PlatformInfo.PackageKeys"/> 的顺序挑；没有时上面的地址是 Windows 版，
+    /// 其他系统按发布文件名的约定（…-win-x64.zip → …-osx-universal.zip / …-linux-x64.tar.gz）换成 GitHub 上同一发布的安装包——
+    /// 本站中转只有 Windows 版，只能从 GitHub 下载，SHA-256 从同一发布的 SHA256SUMS 查。都没有时返回 null（本机不能安装）。
+    /// </summary>
+    private static PackageSource? Package(string id, string download, string? origin, long size, string? sha256,
+        Dictionary<string, PlatformBuild>? platforms)
     {
+        if (platforms is { Count: > 0 })
+        {
+            foreach (var key in PlatformInfo.PackageKeys)
+            {
+                if (platforms.GetValueOrDefault(key) is { Download.Length: > 0 } build)
+                    return new PackageSource(build.Download, build.Origin, build.Size, build.Sha256, null, PlatformInfo.PackageExtension(key));
+            }
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            return new PackageSource(download, origin, size, sha256, null, ".zip");
+        }
+        else if (origin is not null && origin.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase)
+                 && origin.EndsWith(WindowsSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            var key = PlatformInfo.PackageKeys[0];
+            var extension = PlatformInfo.PackageExtension(key);
+            var url = $"{origin[..^WindowsSuffix.Length]}-{key}{extension}";
+            var checksums = origin[..(origin.LastIndexOf('/') + 1)] + "SHA256SUMS";
+            return new PackageSource(url, url, 0, null, checksums, extension);
+        }
+        Log.Info($"{id} 没有 {PlatformInfo.Name}（{string.Join(" / ", PlatformInfo.PackageKeys)}）版本");
+        return null;
+    }
+
+    private static ManifestProduct Product(string id, CatalogEntry? entry, string version, DateTimeOffset? publishedAt,
+        PackageSource package, string? notesUrl, bool prerelease, string? changelog)
+    {
+        var size = package.Size;
         var date = Date(publishedAt);
         return new ManifestProduct
         {
@@ -200,26 +253,31 @@ public static class ManifestSource
             ReleaseDate = date,
             Size = size,
             Prerelease = prerelease,
-            Executable = entry?.Executable ?? (OperatingSystem.IsWindows() ? id + ".exe" : null),
-            DownloadUrl = download,
-            OriginUrl = origin,
+            Executable = PlatformInfo.ExecutableName(entry?.Executable ?? id + ".exe"),
+            DownloadUrl = package.Download,
+            OriginUrl = package.Origin,
             NotesUrl = notesUrl,
-            Sha256 = sha256,
+            Sha256 = package.Sha256,
+            ChecksumsUrl = package.ChecksumsUrl,
+            PackageExtension = package.Extension,
             Requires = entry?.Requires ?? [],
             Components = [new ManifestComponent { Id = "core", Name = "主程序", Size = size, Required = true }],
             Changelog = [new ManifestChangelog { Version = version, Date = date, Changes = ReleaseNotes.Summarize(changelog) }]
         };
     }
 
-    private static LauncherRelease Launcher(AppBuild build) => new()
+    private static LauncherRelease Launcher(AppBuild build, PackageSource package) => new()
     {
         Version = build.Version,
         ReleaseDate = Date(build.PublishedAt),
-        Size = build.Size,
+        Size = package.Size,
         Prerelease = build.Prerelease,
         Notes = ReleaseNotes.Summarize(build.Changelog),
-        DownloadUrl = build.Download,
-        Sha256 = build.Sha256
+        // 本站中转不提供时（其他平台按文件名推出的 GitHub 地址）用 GitHub 地址
+        DownloadUrl = package.Download,
+        Sha256 = package.Sha256,
+        ChecksumsUrl = package.ChecksumsUrl,
+        PackageExtension = package.Extension
     };
 
     private static string Date(DateTimeOffset? value) => (value ?? DateTimeOffset.UtcNow).ToLocalTime().ToString("yyyy-MM-dd");

@@ -1,0 +1,24 @@
+<Project>
+  <!--
+    各平台发布配置（win-x64.pubxml、osx-arm64.pubxml …）共用的设置：
+    dotnet publish src/Downloader -p:PublishProfile=<平台>，输出 publish/<平台>/ 下一个单文件程序（Windows 是 Downloader.exe，
+    macOS / Linux 是 Downloader）。自包含（不需要安装 .NET），原生库（Skia、HarfBuzz、ANGLE / AvaloniaNative）也打包在内，
+    首次运行时解压到临时目录。macOS 的 .app 包与 Linux 的 tar.gz 由 packaging/ 下的脚本在此基础上制作。
+  -->
+  <PropertyGroup>
+    <Configuration>Release</Configuration>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <PublishDir>$(MSBuildThisFileDirectory)../../../../publish/$(RuntimeIdentifier)/</PublishDir>
+  </PropertyGroup>
+
+  <!-- SkiaSharp / HarfBuzz 包自带的原生调试符号（100 MB 以上）不发布；本程序的符号已嵌入程序 -->
+  <Target Name="ExcludeNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb' or '%(Extension)' == '.dbg'" />
+    </ItemGroup>
+  </Target>
+</Project>

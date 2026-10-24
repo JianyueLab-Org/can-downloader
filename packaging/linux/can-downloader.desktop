@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CAN Downloader
+Name[zh_CN]=CAN 下载器
+Comment=Install and update CAN clients
+Comment[zh_CN]=安装、更新 CAN 连飞网络的客户端
+Exec=can-downloader
+Icon=system-software-install
+Terminal=false
+Categories=Utility;Network;

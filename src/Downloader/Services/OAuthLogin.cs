@@ -322,7 +322,7 @@ public static class OAuthLogin
     private static string Page(string title, string message) =>
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>" + WebUtility.HtmlEncode(title) + " - CAN 下载器</title>" +
         "<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#16181c;color:#d7dae0;" +
-        "font:13px 'Segoe UI','Microsoft YaHei',sans-serif}main{text-align:center}h1{font-size:16px;font-weight:600;margin:0 0 8px}" +
+        "font:13px system-ui,-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC','Noto Sans CJK SC',sans-serif}main{text-align:center}h1{font-size:16px;font-weight:600;margin:0 0 8px}" +
         "p{margin:0;color:#8b9098}</style></head><body><main><h1>" + WebUtility.HtmlEncode(title) + "</h1><p>" +
         WebUtility.HtmlEncode(message) + "</p></main></body></html>";
 

@@ -68,6 +68,10 @@ public sealed partial class ProductViewModel : LibraryEntry
     public string? OriginUrl { get; private set; }
     /// <summary>安装包的 SHA-256，有的话下载后核对。</summary>
     public string? Sha256 { get; private set; }
+    /// <summary>没有 SHA-256 时从这个 SHA256SUMS 里查。</summary>
+    public string? ChecksumsUrl { get; private set; }
+    /// <summary>安装包扩展名（.zip / .tar.gz）。</summary>
+    public string PackageExtension { get; private set; } = ".zip";
 
     [ObservableProperty] private bool _isPrerelease;
 
@@ -88,7 +92,8 @@ public sealed partial class ProductViewModel : LibraryEntry
 
     /// <summary>选中组件的下载大小。</summary>
     public long DownloadSize => Components.Where(c => c.IsSelected).Sum(c => c.Size);
-    public string DownloadSizeText => Format.Size(DownloadSize);
+    /// <summary>大小未知（按文件名推出的其他平台安装包）时显示“未知”。</summary>
+    public string DownloadSizeText => DownloadSize > 0 ? Format.Size(DownloadSize) : "未知";
 
     /// <summary>本次检查更新时新出现在清单里的软件，显示“新”标记。</summary>
     [ObservableProperty] private bool _isNew;
@@ -213,6 +218,8 @@ public sealed partial class ProductViewModel : LibraryEntry
         DownloadUrl = product.DownloadUrl;
         OriginUrl = product.OriginUrl;
         Sha256 = product.Sha256;
+        ChecksumsUrl = product.ChecksumsUrl;
+        PackageExtension = product.PackageExtension;
         IsPrerelease = product.Prerelease;
         NotesUrl = product.NotesUrl;
         OnPropertyChanged(nameof(CanDownload));
