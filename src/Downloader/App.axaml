@@ -13,6 +13,9 @@
   -->
   <Application.Styles>
     <SimpleTheme />
+    <Style Selector="Window">
+      <Setter Property="Icon" Value="/Assets/app.ico" />
+    </Style>
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Simple.xaml" />
     <StyleInclude Source="avares://Downloader/Styles/Theme/Controls.axaml" />
     <StyleInclude Source="avares://Downloader/Styles/App.axaml" />

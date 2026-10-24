@@ -11,14 +11,16 @@ share=${XDG_DATA_HOME:-$HOME/.local/share}
 dir="$share/can-downloader"
 command="$HOME/.local/bin/can-downloader"
 desktop="$share/applications/can-downloader.desktop"
+icon="$share/icons/hicolor/64x64/apps/can-downloader.png"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$dir/Downloader" "$command" "$desktop"
+  rm -f "$dir/Downloader" "$dir/app-logo.png" "$command" "$desktop" "$icon"
   echo "已卸载。数据和已安装的软件仍在 $dir，不需要时手动删除。"
   exit 0
 fi
 
-mkdir -p "$dir" "$(dirname "$command")" "$(dirname "$desktop")"
+mkdir -p "$dir" "$(dirname "$command")" "$(dirname "$desktop")" "$(dirname "$icon")"
+cp "$here/app-logo.png" "$icon"
 # 先复制到临时文件再改名：下载器正在运行时也能覆盖
 cp "$here/Downloader" "$dir/Downloader.tmp"
 chmod 755 "$dir/Downloader.tmp"

@@ -3,6 +3,7 @@
 #   Downloader              程序（自包含，任何 glibc 发行版都能直接运行）
 #   install.sh              装到当前用户目录并加入应用菜单（不需要 root）
 #   can-downloader.desktop  应用菜单项
+#   app-logo.png            应用图标
 #   packaging/linux/package.sh <发布目录> <输出的 .tar.gz>
 set -euo pipefail
 
@@ -16,6 +17,7 @@ mkdir "${staging}/can-downloader"
 install -m 755 "${publish}/Downloader" "${staging}/can-downloader/Downloader"
 install -m 755 "${here}/install.sh" "${staging}/can-downloader/install.sh"
 install -m 644 "${here}/can-downloader.desktop" "${staging}/can-downloader/can-downloader.desktop"
+install -m 644 "${here}/../../src/Downloader/Assets/app-logo.png" "${staging}/can-downloader/app-logo.png"
 
 mkdir -p "$(dirname "$output")"
 tar -czf "$output" -C "$staging" --owner=0 --group=0 can-downloader
