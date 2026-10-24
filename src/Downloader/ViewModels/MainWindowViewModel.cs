@@ -451,7 +451,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         return limit <= 0 ? 0 : limit / Math.Max(1, _activeDownloads);
     }
 
-    /// <summary>下载完成：校验、解压到安装目录、删除旧版本多余的文件、记录安装。</summary>
+    /// <summary>下载完成：校验、暂存并以可回滚操作提交文件和安装记录。</summary>
     private async Task InstallPackageAsync(ProductViewModel product, Transfer transfer)
     {
         product.State = ProductState.Installing;
@@ -491,26 +491,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ProductTask.Update => "正在更新…",
                 _ => "正在安装…"
             };
-            var previous = LocalInstalls.Find(product.Id);
-            var files = await Task.Run(() => PackageInstaller.Extract(zip, installDir));
-            if (previous is not null)
-                await Task.Run(() => PackageInstaller.RemoveStale(previous, files, installDir));
-
-            Log.Info($"已安装 {product.Id} {product.LatestVersion} → {installDir}（{files.Count} 个文件）");
-            LocalInstalls.Set(new InstallRecord
-            {
-                Id = product.Id,
-                Version = product.LatestVersion,
-                Path = installDir,
-                Files = files,
-                InstalledAt = DateTimeOffset.Now
-            });
-            product.InstalledVersion = product.LatestVersion;
+            var version = product.LatestVersion;
+            var record = await Task.Run(() => PackageInstaller.Install(zip, product.Id, version, installDir));
+            Log.Info($"已安装 {product.Id} {record.Version} → {record.Path}（{record.Files.Count} 个文件）");
+            product.InstalledVersion = record.Version;
+            product.InstallPath = record.Path;
             if (Settings.DeleteCacheAfterInstall)
                 TryDelete(zip);
         }
         catch (Exception ex)
         {
+            if (LocalInstalls.Find(product.Id) is { } previous)
+            {
+                product.InstalledVersion = previous.Version;
+                product.InstallPath = previous.Path;
+            }
             Fail(product, transfer, transfer.Task == ProductTask.Install ? "安装失败" : "更新失败", ex);
             return;
         }

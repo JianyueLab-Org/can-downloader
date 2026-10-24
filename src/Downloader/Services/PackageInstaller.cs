@@ -137,28 +137,207 @@ public static class PackageInstaller
         }
     }
 
-    /// <summary>
-    /// 解压到 <paramref name="installDir"/>，覆盖同名文件；压缩包只有一个顶层目录时去掉这一层。
-    /// 返回解压出的文件（相对安装目录）。
-    /// </summary>
-    public static List<string> Extract(string zipPath, string installDir)
+    /// <summary>先暂存安装包，再备份、替换、清理旧文件并提交安装记录；失败时回滚。</summary>
+    public static InstallRecord Install(string zipPath, string id, string version, string installDir)
+    {
+        // 安装记录是整个软件库的一个文件，安装与记录提交必须串行。
+        lock (LocalInstalls.Gate)
+        {
+            var previous = LocalInstalls.Find(id);
+            var root = Path.GetFullPath(installDir);
+            var workspace = Path.Combine(LocalData.Root, $".install-{Guid.NewGuid():N}");
+            var stage = Path.Combine(workspace, "stage");
+            var backups = new Dictionary<string, string?>(PathComparer);
+            var changed = new List<string>();
+            var createdDirectories = new List<string>();
+            var removedDirectories = new List<string>();
+            var retainRecovery = false;
+            try
+            {
+                var files = Stage(zipPath, stage);
+                var currentPaths = files.Select(f => ManagedPath(root, f)).ToHashSet(PathComparer);
+                var previousPaths = previous is null
+                    ? new HashSet<string>(PathComparer)
+                    : previous.Files.Select(f => ManagedPath(previous.Path, f)).ToHashSet(PathComparer);
+                var stale = previousPaths.Where(p => !currentPaths.Contains(p)).ToList();
+                Directory.CreateDirectory(Path.Combine(workspace, "backup"));
+
+                // 备份所有将被改动的文件；备份失败时尚未触碰安装目录。
+                foreach (var path in currentPaths.Concat(stale).Distinct(PathComparer))
+                {
+                    string? backup = null;
+                    if (File.Exists(path))
+                    {
+                        if (!previousPaths.Contains(path))
+                            throw new IOException($"安装位置包含不属于此软件的文件，未覆盖：{path}");
+                        backup = Path.Combine(workspace, "backup", backups.Count.ToString());
+                        File.Copy(path, backup);
+                    }
+                    backups.Add(path, backup);
+                }
+
+                var record = new InstallRecord
+                {
+                    Id = id,
+                    Version = version,
+                    Path = root,
+                    Files = files,
+                    InstalledAt = DateTimeOffset.Now
+                };
+                File.WriteAllText(Path.Combine(workspace, "recovery.json"),
+                    System.Text.Json.JsonSerializer.Serialize(new { Previous = previous, Next = record, Backups = backups }));
+
+                foreach (var file in files)
+                {
+                    var destination = ManagedPath(root, file);
+                    EnsureDirectory(Path.GetDirectoryName(destination)!, createdDirectories);
+                    ReplaceFile(ManagedPath(stage, file), destination);
+                    changed.Add(destination);
+                }
+                foreach (var path in stale)
+                {
+                    // 目录冲突和 Windows 文件占用也必须报告，不能当作文件不存在。
+                    File.Delete(path);
+                    if (backups[path] is not null)
+                        changed.Add(path);
+                }
+                if (previous is not null)
+                    RemoveEmptyDirectories(previous.Path, stale, removedDirectories);
+
+                LocalInstalls.Set(record);
+                return record;
+            }
+            catch (Exception failure)
+            {
+                var recoveryErrors = new List<Exception>();
+                foreach (var directory in removedDirectories.AsEnumerable().Reverse())
+                {
+                    try { Directory.CreateDirectory(directory); }
+                    catch (Exception ex) { recoveryErrors.Add(ex); }
+                }
+                foreach (var path in changed.AsEnumerable().Reverse())
+                {
+                    try
+                    {
+                        if (backups[path] is { } backup)
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                            ReplaceFile(backup, path);
+                        }
+                        else
+                            File.Delete(path);
+                    }
+                    catch (Exception ex) { recoveryErrors.Add(ex); }
+                }
+                foreach (var directory in createdDirectories.OrderByDescending(d => d.Length))
+                {
+                    try
+                    {
+                        if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+                            Directory.Delete(directory);
+                    }
+                    catch (Exception ex) { recoveryErrors.Add(ex); }
+                }
+                if (recoveryErrors.Count > 0)
+                {
+                    retainRecovery = true;
+                    throw new IOException($"安装失败且未能完整恢复，安装记录未更新。请勿启动软件；备份保留在 {workspace}。",
+                        new AggregateException(new[] { failure }.Concat(recoveryErrors)));
+                }
+                throw;
+            }
+            finally
+            {
+                if (!retainRecovery)
+                {
+                    try
+                    {
+                        if (Directory.Exists(workspace))
+                            Directory.Delete(workspace, recursive: true);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Log.Warn($"Cannot remove installation workspace {workspace}: {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
+
+    private static StringComparer PathComparer => OperatingSystem.IsLinux()
+        ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    private static string ManagedPath(string root, string relative)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        var prefix = Path.EndsInDirectorySeparator(fullRoot) ? fullRoot : fullRoot + Path.DirectorySeparatorChar;
+        var path = Path.GetFullPath(Path.Combine(fullRoot, relative));
+        var comparison = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        if (!path.StartsWith(prefix, comparison))
+            throw new InvalidDataException($"安装包或安装记录包含非法路径：{relative}");
+        return path;
+    }
+
+    private static void EnsureDirectory(string path, List<string> created)
+    {
+        for (var directory = path; directory is not null && !Directory.Exists(directory); directory = Path.GetDirectoryName(directory))
+            if (!created.Contains(directory, PathComparer))
+                created.Add(directory);
+        Directory.CreateDirectory(path);
+    }
+
+    private static void ReplaceFile(string source, string destination)
+    {
+        // 临时文件与目标在同一目录，提交使用同一文件系统内的改名。
+        var temp = Path.Combine(Path.GetDirectoryName(destination)!, $".can-install-{Guid.NewGuid():N}");
+        try
+        {
+            File.Copy(source, temp);
+            File.Move(temp, destination, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Warn($"Cannot remove installation temporary file {temp}: {ex.Message}");
+            }
+        }
+    }
+
+    private static void RemoveEmptyDirectories(string root, IEnumerable<string> files, List<string> removed)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        var directories = new HashSet<string>(PathComparer);
+        foreach (var file in files)
+            for (var directory = Path.GetDirectoryName(file); directory is not null && directory.Length > fullRoot.Length;
+                 directory = Path.GetDirectoryName(directory))
+                directories.Add(directory);
+        foreach (var directory in directories.OrderByDescending(d => d.Length).Append(fullRoot))
+        {
+            if (!Directory.Exists(directory) || Directory.EnumerateFileSystemEntries(directory).Any())
+                continue;
+            Directory.Delete(directory);
+            removed.Add(directory);
+        }
+    }
+
+    /// <summary>完整解压到暂存目录，保留原有顶层目录剥离规则。</summary>
+    private static List<string> Stage(string zipPath, string installDir)
     {
         using var zip = ZipFile.OpenRead(zipPath);
         var prefix = CommonTopFolder(zip.Entries);
         var root = Path.GetFullPath(installDir);
-        var rootWithSeparator = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
         Directory.CreateDirectory(root);
 
         var files = new List<string>();
+        var seen = new HashSet<string>(PathComparer);
         foreach (var entry in zip.Entries)
         {
             var relative = entry.FullName[prefix.Length..].Replace('\\', '/');
             if (relative.Length == 0)
                 continue;
-            var destination = Path.GetFullPath(Path.Combine(root, relative));
-            // 防止压缩包里的 ../ 写到安装目录之外
-            if (!destination.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"安装包包含非法路径：{entry.FullName}");
+            var destination = ManagedPath(root, relative);
 
             if (relative.EndsWith('/'))
             {
@@ -167,17 +346,10 @@ public static class PackageInstaller
             }
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             entry.ExtractToFile(destination, overwrite: true);
-            files.Add(relative);
+            if (seen.Add(relative))
+                files.Add(relative);
         }
         return files;
-    }
-
-    /// <summary>更新或修复后：删除旧版本有、新版本没有的文件。</summary>
-    public static void RemoveStale(InstallRecord previous, IReadOnlyCollection<string> current, string installDir)
-    {
-        var keep = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
-        var sameDir = string.Equals(Path.GetFullPath(previous.Path), Path.GetFullPath(installDir), StringComparison.OrdinalIgnoreCase);
-        DeleteFiles(previous.Path, previous.Files.Where(f => !sameDir || !keep.Contains(f)));
     }
 
     /// <summary>卸载：删除记录的文件和留下的空目录。用户自己放进去的文件保留。</summary>
