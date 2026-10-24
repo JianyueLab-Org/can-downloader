@@ -121,6 +121,8 @@ try
             Check(vm.Notices.Any(n => n.Text.Contains("正在运行")));
             return;
         }
+        if (!File.Exists(Path.Combine(product.InstallPath, "a.txt")))
+            throw new Exception("安装未产生预期文件：" + string.Join("；", vm.Notices.Select(n => n.Text)));
         Check(File.ReadAllText(Path.Combine(product.InstallPath, "a.txt")) == "VERSION_ONE");
         Check(LocalInstalls.Find(id)?.Version == "1");
         Check(product.LatestVersion == "2" && product.HasUpdate);
@@ -164,6 +166,26 @@ try
         var target = Path.Combine(dir, "a.txt");
         Check(File.ReadAllText(target) == "TAR");
         if (!OperatingSystem.IsWindows()) Check((File.GetUnixFileMode(target) & UnixFileMode.UserExecute) != 0);
+    });
+    if (!OperatingSystem.IsWindows()) Run("允许安装目录祖先链接并拒绝目录内链接", () =>
+    {
+        var (release, dir) = Setup("ancestor-link");
+        var alias = Path.Combine(root, "root-alias");
+        Directory.CreateSymbolicLink(alias, root);
+        try
+        {
+            var aliased = release with { InstallPath = Path.Combine(alias, "ancestor-link") };
+            // 避免同一个目录的两个文本路径形成重复更新，本场景记录也使用别名。
+            LocalInstalls.Set(new InstallRecord { Id = release.Id, Version = "1", Path = aliased.InstallPath, Files = ["a.txt", "stale.txt"] });
+            InstallationTransaction.Install(Package(("a.txt", "NEW")), aliased);
+            Check(File.ReadAllText(Path.Combine(dir, "a.txt")) == "NEW");
+            var outside = Path.Combine(root, "outside");
+            Directory.CreateDirectory(outside);
+            Directory.CreateSymbolicLink(Path.Combine(dir, "linked"), outside);
+            Throws(() => InstallationTransaction.Install(Package(("linked/file.txt", "BAD")), aliased));
+            Check(!File.Exists(Path.Combine(outside, "file.txt")));
+        }
+        finally { Directory.Delete(alias); }
     });
     Run("目录冲突不改动旧安装", () =>
     {
