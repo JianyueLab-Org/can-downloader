@@ -12,8 +12,9 @@ pkgdesc="CAN 下载器：安装、更新 CAN 连飞网络的客户端"
 arch=('x86_64')
 url="https://github.com/JianyueLab-Org/can-downloader"
 license=('LicenseRef-can-downloader')
-# .NET 运行时要 glibc / libstdc++ / ICU；Avalonia 走 X11（Wayland 下经 XWayland），Skia 要 fontconfig / freetype
-depends=('glibc' 'gcc-libs' 'zlib' 'icu' 'fontconfig' 'freetype2'
+# .NET 运行时要 glibc / libstdc++ / ICU；Avalonia 走 X11（Wayland 下经 XWayland），Skia 要 fontconfig / freetype。
+# 系统里一个字体都没有时 Avalonia 启动就崩溃（Default font family name can't be null），所以依赖 ttf-font（任一字体包都提供）
+depends=('glibc' 'gcc-libs' 'zlib' 'icu' 'fontconfig' 'freetype2' 'ttf-font'
          'libx11' 'libice' 'libsm' 'libxi' 'libxcursor' 'libxrandr' 'libxext')
 optdepends=('noto-fonts-cjk: 界面中文字体（没装任何中文字体时显示成方框）'
             'xdg-utils: 登录时打开浏览器、打开文件夹'
