@@ -92,12 +92,12 @@ public static class LocalData
     }
 
     /// <summary>先写临时文件再替换，避免写到一半时程序退出留下损坏的文件。</summary>
-    public static void Save<T>(string name, T value)
+    public static void Save<T>(string name, T value, bool throwOnError = false)
     {
         try
         {
             var path = Path.Combine(Root, name);
-            var temp = path + ".tmp";
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             if (OperatingSystem.IsWindows())
             {
                 Directory.CreateDirectory(Root);
@@ -115,10 +115,17 @@ public static class LocalData
                 using (var writer = new StreamWriter(file))
                     writer.Write(JsonSerializer.Serialize(value, Json));
             }
+            if (throwOnError)
+            {
+                using var durable = new FileStream(temp, FileMode.Open, FileAccess.Write, FileShare.None);
+                durable.Flush(flushToDisk: true);
+            }
             File.Move(temp, path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            if (throwOnError)
+                throw;
             // 保存失败不影响本次使用
             Log.Warn($"保存 {name} 失败：{ex.Message}");
         }
@@ -181,6 +188,7 @@ public static class AccountStore
 /// <summary>一个已安装的软件：版本、位置和安装的文件（卸载、更新时删除旧文件用）。</summary>
 public sealed class InstallRecord
 {
+    public string? TransactionId { get; set; }
     public string Id { get; set; } = "";
     public string Version { get; set; } = "";
     public string Path { get; set; } = "";
@@ -192,6 +200,7 @@ public sealed class InstallRecord
 /// <summary>本机已安装的软件，保存在 installs.json。安装目录已被手动删除的记录在读取时丢弃。</summary>
 public static class LocalInstalls
 {
+    internal static readonly object Sync = new();
     private const string FileName = "installs.json";
     private static Dictionary<string, InstallRecord>? _records;
 
@@ -201,6 +210,7 @@ public static class LocalInstalls
         {
             if (_records is not null)
                 return _records;
+            InstallationTransaction.Recover();
             var loaded = LocalData.Load<List<InstallRecord>>(FileName) ?? [];
             _records = loaded
                 .Where(r => r.Id.Length > 0 && Directory.Exists(r.Path))
@@ -210,19 +220,30 @@ public static class LocalInstalls
         }
     }
 
-    public static InstallRecord? Find(string id) => Records.GetValueOrDefault(id);
+    public static InstallRecord? Find(string id)
+    {
+        lock (Sync) return Records.GetValueOrDefault(id);
+    }
 
     public static void Set(InstallRecord record)
     {
-        Records[record.Id] = record;
-        Save();
+        lock (Sync)
+        {
+            var next = new Dictionary<string, InstallRecord>(Records) { [record.Id] = record };
+            LocalData.Save(FileName, next.Values.ToList(), throwOnError: true);
+            _records = next;
+        }
     }
 
     public static void Remove(string id)
     {
-        if (Records.Remove(id))
-            Save();
+        lock (Sync)
+        {
+            var next = new Dictionary<string, InstallRecord>(Records);
+            if (!next.Remove(id)) return;
+            LocalData.Save(FileName, next.Values.ToList(), throwOnError: true);
+            _records = next;
+        }
     }
 
-    private static void Save() => LocalData.Save(FileName, Records.Values.ToList());
 }
