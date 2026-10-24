@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Downloader/Downloader.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Downloader.RegressionTests/Downloader.RegressionTests.csproj" />
+  </Folder>
 </Solution>
