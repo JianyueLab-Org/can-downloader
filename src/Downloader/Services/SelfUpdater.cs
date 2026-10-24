@@ -38,9 +38,7 @@ public static class SelfUpdater
                 return "请先把 CAN Downloader 拖进“应用程序”文件夹再打开，才能自动更新。";
             var folder = Path.GetDirectoryName(current)!;
             if (!AppPaths.IsWritable(folder))
-                return OperatingSystem.IsLinux()
-                    ? "下载器由系统包管理器安装（如 pacman），请用包管理器更新。"
-                    : $"没有权限写入 {folder}，请手动下载新版本。";
+                return $"没有权限写入 {folder}，请手动下载新版本。";
             return null;
         }
     }

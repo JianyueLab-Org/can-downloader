@@ -204,7 +204,7 @@ public static class ManifestSource
 
     /// <summary>
     /// 本机用的安装包。API 给出 <c>platforms</c> 时按 <see cref="PlatformInfo.PackageKeys"/> 的顺序挑；没有时上面的地址是 Windows 版，
-    /// 其他系统按发布文件名的约定（…-win-x64.zip → …-osx-universal.zip / …-linux-x64.tar.gz）换成 GitHub 上同一发布的安装包——
+    /// 其他系统按发布文件名的约定（…-win-x64.zip → …-osx-arm64.zip / …-linux-x64.tar.gz）换成 GitHub 上同一发布的安装包——
     /// 本站中转只有 Windows 版，只能从 GitHub 下载，SHA-256 从同一发布的 SHA256SUMS 查。都没有时返回 null（本机不能安装）。
     /// </summary>
     private static PackageSource? Package(string id, string download, string? origin, long size, string? sha256,
@@ -222,7 +222,8 @@ public static class ManifestSource
         {
             return new PackageSource(download, origin, size, sha256, null, ".zip");
         }
-        else if (origin is not null && origin.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase)
+        else if (PlatformInfo.PackageKeys.Count > 0
+                 && origin is not null && origin.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase)
                  && origin.EndsWith(WindowsSuffix, StringComparison.OrdinalIgnoreCase))
         {
             var key = PlatformInfo.PackageKeys[0];

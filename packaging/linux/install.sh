@@ -1,5 +1,5 @@
 #!/bin/sh
-# 把下载器装到当前用户目录并加入应用菜单，适用于 Arch 以外的发行版（Arch 用 pacman 包），不需要 root：
+# 把下载器装到当前用户目录并加入应用菜单，适用于各 Linux 发行版，不需要 root：
 #   程序   ~/.local/share/can-downloader/Downloader（目录可写，下载器能自动更新；数据、日志、默认安装目录也在这里）
 #   命令   ~/.local/bin/can-downloader
 #   菜单   ~/.local/share/applications/can-downloader.desktop
