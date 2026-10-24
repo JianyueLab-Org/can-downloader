@@ -58,16 +58,33 @@ public static class LocalData
     {
         try
         {
-            Directory.CreateDirectory(Root);
-            var path = Path.Combine(Root, name);
-            var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(value, Json));
-            File.Move(temp, path, overwrite: true);
+            SaveRequired(name, value);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 保存失败不影响本次使用
             Log.Warn($"保存 {name} 失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>安装记录必须落盘成功；失败时保留原文件并向调用方报告。</summary>
+    internal static void SaveRequired<T>(string name, T value)
+    {
+        Directory.CreateDirectory(Root);
+        var path = Path.Combine(Root, name);
+        var temp = path + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(value, Json));
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Warn($"Cannot remove temporary data file {temp}: {ex.Message}");
+            }
         }
     }
 }
@@ -140,6 +157,7 @@ public sealed class InstallRecord
 public static class LocalInstalls
 {
     private const string FileName = "installs.json";
+    internal static readonly object Gate = new();
     private static Dictionary<string, InstallRecord>? _records;
 
     private static Dictionary<string, InstallRecord> Records
@@ -157,19 +175,31 @@ public static class LocalInstalls
         }
     }
 
-    public static InstallRecord? Find(string id) => Records.GetValueOrDefault(id);
+    public static InstallRecord? Find(string id)
+    {
+        lock (Gate)
+            return Records.GetValueOrDefault(id);
+    }
 
     public static void Set(InstallRecord record)
     {
-        Records[record.Id] = record;
-        Save();
+        lock (Gate)
+        {
+            var next = new Dictionary<string, InstallRecord>(Records) { [record.Id] = record };
+            LocalData.SaveRequired(FileName, next.Values.ToList());
+            _records = next;
+        }
     }
 
     public static void Remove(string id)
     {
-        if (Records.Remove(id))
-            Save();
+        lock (Gate)
+        {
+            var next = new Dictionary<string, InstallRecord>(Records);
+            if (!next.Remove(id))
+                return;
+            LocalData.SaveRequired(FileName, next.Values.ToList());
+            _records = next;
+        }
     }
-
-    private static void Save() => LocalData.Save(FileName, Records.Values.ToList());
 }

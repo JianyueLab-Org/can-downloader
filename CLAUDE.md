@@ -67,7 +67,7 @@ dotnet publish src/Downloader -p:PublishProfile=win-x64   # 单文件 publish/wi
 
 ## 验证方式
 
-没有自动化测试。不要用真实账号测试登录（线上服务）；OAuth 的本机回调可以用不打开浏览器的方式测试（`OAuthLogin.SignInAsync` 的 openBrowser 参数）。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
+安装逻辑的自动回归检查：`dotnet run --project tests/InstallerChecks`，使用真实临时目录、zip 和安装记录，不连接服务。Windows 文件占用检查需在 Windows 上运行。不要用真实账号测试登录（线上服务）；OAuth 的本机回调可以用不打开浏览器的方式测试（`OAuthLogin.SignInAsync` 的 openBrowser 参数）。改界面后编译到单独目录（`dotnet build -o <临时目录>`）另开实例，用 PowerShell UI Automation 点击按钮、`PrintWindow` 截图确认；不要关闭或干扰用户正在运行的窗口。
 
 ## Git
 
