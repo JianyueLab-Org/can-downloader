@@ -49,7 +49,7 @@ public sealed class AppBuild
     /// <summary>发布说明正文（Markdown）。</summary>
     public string? Changelog { get; set; }
     /// <summary>
-    /// 各平台的安装包，以平台标识为键（win-x64、osx-universal、osx-arm64、osx-x64、linux-x64、linux-arm64，见 <see cref="PlatformInfo"/>）。
+    /// 各平台的安装包，以平台标识为键（win-x64、osx-arm64、osx-universal、linux-x64、linux-arm64，见 <see cref="PlatformInfo"/>）。
     /// 没有这一项时（目前的 API）上面的地址是 Windows 版。
     /// </summary>
     public Dictionary<string, PlatformBuild>? Platforms { get; set; }
@@ -65,7 +65,7 @@ public sealed class ClientBuild
     /// <summary>GitHub 上的原始地址。</summary>
     public string? Origin { get; set; }
     /// <summary>
-    /// 各平台的安装包，以平台标识为键（win-x64、osx-universal、osx-arm64、osx-x64、linux-x64、linux-arm64，见 <see cref="PlatformInfo"/>）。
+    /// 各平台的安装包，以平台标识为键（win-x64、osx-arm64、osx-universal、linux-x64、linux-arm64，见 <see cref="PlatformInfo"/>）。
     /// 没有这一项时（目前的 API）上面的地址是 Windows 版。
     /// </summary>
     public Dictionary<string, PlatformBuild>? Platforms { get; set; }

@@ -1,6 +1,6 @@
 # CAN 下载器
 
-基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client，Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，同一套代码发布 Windows、macOS（Apple Silicon 和 Intel 通用）、Linux（Arch 包 + 通用 tar.gz）三个平台，软件库只列出有本机平台安装包的软件（目前 Audio / ATIS / MSFS / XPC for CAN 只有 Windows 版，CAN Pilot Client 三个平台都有）。
+基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client，Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，同一套代码发布 Windows、macOS（仅 Apple Silicon ARM64）、Linux（通用 tar.gz）三个平台，软件库只列出有本机平台安装包的软件（目前 Audio / ATIS / MSFS / XPC for CAN 只有 Windows 版，CAN Pilot Client 三个平台都有）。
 
 已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载、下载器自更新。
 
@@ -9,7 +9,7 @@
 | 登录（OAuth 2.1 授权码 + PKCE，公开客户端，在 [platform.ceruleanavi.net](https://platform.ceruleanavi.net/) 注册） | 发现文档 `/.well-known/openid-configuration`；授权页 `https://ceruleanavi.net/oauth/authorize`；`/api/oauth/token`、`/api/oauth/userinfo`、`/api/oauth/revoke` |
 | 软件列表与版本 | `GET /api/v1/clients/latest`：`clients` 是 can-audio 的客户端合集；`apps` 是独立发布的程序（`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明 |
 | 下载器自更新 | `apps.can-downloader`（下载地址同下） |
-| 各平台安装包 | `clients.<名称>.platforms` / `apps.<名称>.platforms`（可选）：以平台标识为键（`win-x64`、`osx-universal`、`osx-arm64`、`osx-x64`、`linux-x64`、`linux-arm64`），值为 `{download, origin, size, sha256}`。没有时顶层地址是 Windows 版，见下面“平台” |
+| 各平台安装包 | `clients.<名称>.platforms` / `apps.<名称>.platforms`（可选）：以平台标识为键（`win-x64`、`osx-arm64`、`osx-universal`、`linux-x64`、`linux-arm64`），值为 `{download, origin, size, sha256}`。没有时顶层地址是 Windows 版，见下面“平台” |
 | 下载（下载源“本站”） | `GET /api/v1/clients/download/{client}`，支持 Range 续传 |
 | 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址；私有仓库（CAN Pilot Client、下载器）没有公开地址，始终走本站 |
 
@@ -41,17 +41,16 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 | 平台 | 下载器安装包 | 说明 |
 |---|---|---|
 | Windows x64 | `CAN-Downloader-<版本>-win-x64.zip` | 只含 `Downloader.exe`，便携 |
-| macOS 12+ | `CAN-Downloader-<版本>-osx-universal.zip` | `CAN Downloader.app`，Apple Silicon 和 Intel 通用（`Contents/MacOS` 里两份单文件程序加一个通用入口，见 `packaging/macos`）。ad-hoc 签名、没有公证：用浏览器下载的话第一次打开前执行 `xattr -dr com.apple.quarantine "/Applications/CAN Downloader.app"` |
-| Arch Linux | `can-downloader-bin-<版本>-1-x86_64.pkg.tar.zst`（附 `PKGBUILD`） | `sudo pacman -U can-downloader-bin-*.pkg.tar.zst`，从应用菜单或终端 `can-downloader` 启动；装在 `/opt`，用 pacman 更新 |
-| 其他 Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/share/can-downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
+| macOS 12+（ARM64） | `CAN-Downloader-<版本>-osx-arm64.zip` | `CAN Downloader.app`，仅支持 Apple Silicon，包内直接使用 ARM64 单文件程序。ad-hoc 签名、没有公证：用浏览器下载的话第一次打开前执行 `xattr -dr com.apple.quarantine "/Applications/CAN Downloader.app"` |
+| Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/share/can-downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
 
-下载器按本机平台挑安装包（`ViewModels/Manifest.cs`）：API 给出 `platforms` 时按优先顺序挑（macOS 先通用包，再本机架构，Apple Silicon 也能用 x64 版）；没有 `platforms` 时（目前的 API）顶层地址是 Windows 版，macOS / Linux 按文件名约定把 GitHub 原始地址里的 `-win-x64.zip` 换成 `-osx-universal.zip` / `-linux-x64.tar.gz`（can-pilot 与下载器自己的发布都按这个约定命名），只能从 GitHub 下载，SHA-256 从同一发布的 `SHA256SUMS` 查。都没有的软件不出现在软件库里。
+下载器按本机平台挑安装包（`ViewModels/Manifest.cs`）：API 给出 `platforms` 时按优先顺序挑（macOS 优先 `osx-arm64`，兼容客户端的 `osx-universal` 通用包）；没有 `platforms` 时顶层地址是 Windows 版，macOS / Linux 按文件名约定把 GitHub 原始地址里的 `-win-x64.zip` 换成 `-osx-arm64.zip` / `-linux-x64.tar.gz`，只能从 GitHub 下载，SHA-256 从同一发布的 `SHA256SUMS` 查。都没有的软件不出现在软件库里。
 
 安装软件：Windows 和 macOS 的安装包是 zip（macOS 里是 `.app`，整个包装进安装目录，“打开”用 `open`），Linux 是 tar.gz（保留可执行权限）；软件库里写的 `xxx.exe` 在 macOS / Linux 上是去掉 `.exe` 的程序名。
 
 ## 目录（便携）
 
-所有目录默认都在下载器程序所在的目录下，整个目录复制走即可带走。程序目录不能写时放到用户目录：macOS 的 `.app` 包（`~/Library/Application Support/CAN Downloader`）、Arch 包装在 `/opt`（`~/.local/share/CAN Downloader`，或 `$XDG_DATA_HOME`）。Windows 始终在 exe 所在目录。
+所有目录默认都在下载器程序所在的目录下，整个目录复制走即可带走。程序目录不能写时放到用户目录：macOS 的 `.app` 包（`~/Library/Application Support/CAN Downloader`）、Linux 不可写目录（如 `/opt`，数据放 `~/.local/share/CAN Downloader`，或 `$XDG_DATA_HOME`）。Windows 始终在 exe 所在目录。
 
 | 目录 | 内容 |
 |---|---|
@@ -85,7 +84,7 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接 API（�
 2. 以 `<原名>.new --apply-update <进程号>` 启动新版本（`.app` 启动包里的入口），当前进程退出
 3. 新版本等旧进程退出，把自己复制到原位置（macOS 先把旧的 `.app` 改名为 `.old`，复制失败时还原）并启动它；最后启动的程序删除 `.new` / `.old`
 
-正在运行的程序文件始终不动：单文件程序按需从程序文件读取程序集，运行中改名会导致之后加载失败。这套流程从 0.0.2 起生效（0.0.1 没有自更新）；编译输出目录里的开发版、Arch 包（装在不可写的 `/opt`，用 pacman 更新）不会自更新。
+正在运行的程序文件始终不动：单文件程序按需从程序文件读取程序集，运行中改名会导致之后加载失败。这套流程从 0.0.2 起生效（0.0.1 没有自更新）；编译输出目录里的开发版、程序目录不可写的版本不会自更新。
 
 开发时可以用环境变量 `CAN_API_URL` 指向本地运行的 can-api（启动时会在日志里提示）。
 
@@ -93,10 +92,10 @@ dotnet run --project src/Downloader -- --offline   # 演示无法连接 API（�
 
 ```bash
 dotnet publish src/Downloader -p:PublishProfile=win-x64   # Windows：publish/win-x64/Downloader.exe
-bash packaging/build.sh                                   # macOS：dist/ 下通用 .app 的 zip；Linux：dist/ 下 tar.gz
+bash packaging/build.sh                                   # macOS ARM64：dist/ 下 .app 的 zip；Linux：dist/ 下 tar.gz
 ```
 
-`packaging/build.sh` 也可指定目标（`osx-universal`、`osx-arm64`、`osx-x64`、`linux-x64`、`linux-arm64`）；macOS 版只能在 macOS 上打。各平台的发布配置在 `src/Downloader/Properties/PublishProfiles/`（共用 `SingleFile.props`），可以在 Windows 上 `dotnet publish src/Downloader -p:PublishProfile=linux-x64` 交叉编译单文件程序。推送 tag 后 CI（`.github/workflows/build.yml`）打出全部平台的安装包、Arch 包和 `SHA256SUMS` 上传到 Release。
+`packaging/build.sh` 也可指定目标（`osx-arm64`、`linux-x64`、`linux-arm64`）；macOS 版只能在 macOS 上打。各平台的发布配置在 `src/Downloader/Properties/PublishProfiles/`（共用 `SingleFile.props`），可以在 Windows 上 `dotnet publish src/Downloader -p:PublishProfile=linux-x64` 交叉编译单文件程序。推送 tag 后 CI（`.github/workflows/build.yml`）打出 Windows x64、macOS ARM64、Linux x64 的安装包和 `SHA256SUMS` 上传到 Release。
 
 版本号只在 `src/Downloader/Downloader.csproj` 的 `<Version>` 里写一处，GitHub Release 的 tag 为 `v<版本号>`（0.x 是预发布；正式版从 3.0.0 起编号，之前发过的 1.0.0 是同一条线上的旧版本）。
 
@@ -125,9 +124,8 @@ src/Downloader/
 └── Views/                  # 启动窗口、登录窗口、主窗口、软件详情、安装对话框、设置
 packaging/
 ├── build.sh                # macOS / Linux 发布并打包
-├── macos/                  # 通用 .app（make-app.sh、launcher.c）
-├── linux/                  # tar.gz、install.sh、应用菜单项
-└── arch/PKGBUILD           # Arch Linux 包
+├── macos/                  # ARM64 .app（make-app.sh）
+└── linux/                  # tar.gz、install.sh、应用菜单项
 ```
 
 ## 修改外观
@@ -144,4 +142,4 @@ packaging/
 - [x] 下载器自身的更新、CAN Pilot Client（需要 can-api 的 `apps` 部署上线，并配置能读取私有仓库的 `GITHUB_TOKEN`）
 - [ ] can-voice 新一代客户端（`/api/v1/voice/*`，目前还没有发布可安装的构建）
 - [x] 设置保存、便携目录、按日期分文件的日志、单文件发布
-- [x] macOS（通用 .app）与 Linux（Arch 包、通用 tar.gz）版本；API 加上 `platforms` 后改为按平台的本站中转下载
+- [x] macOS（ARM64 .app）与 Linux（通用 tar.gz）版本；API 加上 `platforms` 后改为按平台的本站中转下载

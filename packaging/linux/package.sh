@@ -2,7 +2,7 @@
 # 把 Linux 的单文件发布打成 tar.gz：解压出来是 can-downloader/ 目录——
 #   Downloader              程序（自包含，任何 glibc 发行版都能直接运行）
 #   install.sh              装到当前用户目录并加入应用菜单（不需要 root）
-#   can-downloader.desktop  应用菜单项（Arch 包 packaging/arch/PKGBUILD 也用它）
+#   can-downloader.desktop  应用菜单项
 #   packaging/linux/package.sh <发布目录> <输出的 .tar.gz>
 set -euo pipefail
 

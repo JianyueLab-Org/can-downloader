@@ -4,14 +4,14 @@ namespace Downloader.Services;
 
 /// <summary>
 /// 当前系统与发布包的对应关系。发布文件名里的平台标识与 can-pilot 一致：
-/// <c>win-x64</c>、<c>osx-universal</c>（Apple Silicon 和 Intel 通用）、<c>osx-arm64</c>、<c>osx-x64</c>、<c>linux-x64</c>、<c>linux-arm64</c>。
+/// <c>win-x64</c>、<c>osx-arm64</c>、<c>linux-x64</c>、<c>linux-arm64</c>；macOS 客户端也兼容 <c>osx-universal</c> 通用包。
 /// </summary>
 public static class PlatformInfo
 {
     public static string Name { get; } =
         OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : "Linux";
 
-    /// <summary>本机能运行的安装包，按优先顺序（通用包优先；Windows ARM 和 Apple Silicon 也能运行 x64 版）。</summary>
+    /// <summary>本机能运行的安装包，按优先顺序（macOS 优先 ARM64，其次兼容通用包；Windows ARM 也能运行 x64 版）。</summary>
     public static IReadOnlyList<string> PackageKeys { get; } = DetectPackageKeys();
 
     /// <summary>macOS 上从 .app 包里运行时为包目录（…/CAN Downloader.app），否则为 null。</summary>
@@ -23,7 +23,7 @@ public static class PlatformInfo
         if (OperatingSystem.IsWindows())
             return arm64 ? ["win-arm64", "win-x64"] : ["win-x64"];
         if (OperatingSystem.IsMacOS())
-            return arm64 ? ["osx-universal", "osx-arm64", "osx-x64"] : ["osx-universal", "osx-x64"];
+            return arm64 ? ["osx-arm64", "osx-universal"] : [];
         return arm64 ? ["linux-arm64"] : ["linux-x64"];
     }
 
