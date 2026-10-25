@@ -18,6 +18,7 @@ mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
 cp "${arm64}/Downloader" "${app}/Contents/MacOS/Downloader"
 chmod +x "${app}/Contents/MacOS/Downloader"
 cp "${here}/../../src/Downloader/Assets/app.icns" "${app}/Contents/Resources/app.icns"
+install -m 755 "${here}/uninstall.sh" "${app}/Contents/Resources/uninstall.sh"
 
 cat > "${app}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

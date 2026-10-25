@@ -160,6 +160,21 @@ jobs:
       - name: 发布并打包 osx-arm64
         run: bash packaging/build.sh osx-arm64
 
+      - name: 验证安装包与安装卸载脚本
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/macos-install-test"
+          mkdir -p "$work/package" "$work/Applications"
+          ditto -x -k "dist/CAN-Downloader-${{ needs.version.outputs.version }}-osx-arm64.zip" "$work/package"
+          test -f "$work/package/install.sh"
+          test -f "$work/package/uninstall.sh"
+          sh "$work/package/install.sh" "$work/Applications"
+          app="$work/Applications/CAN Downloader.app"
+          test -x "$app/Contents/MacOS/Downloader"
+          codesign --verify --deep --strict "$app"
+          sh "$app/Contents/Resources/uninstall.sh"
+          test ! -e "$app"
+
       - name: 启动冒烟测试（Apple Silicon ARM64）
         # 用副本跑，30 秒内退出就算启动失败；日志写在 ~/Library/Application Support/CAN Downloader/logs
         run: |
