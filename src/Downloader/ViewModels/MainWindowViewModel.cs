@@ -291,11 +291,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     // ========== 下载队列 ==========
 
-    /// <summary>一个软件的下载任务。暂停时取消下载、保留 .part 文件，继续时续传。</summary>
-    private sealed class Transfer(ProductTask task, string zipPath)
+    /// <summary>入队时固定发布身份；暂停、排队及清单刷新不改变本次下载，重试会创建新任务。</summary>
+    private sealed class Transfer(ProductTask task, string productId, string version, Uri? url, string zipPath,
+        long expectedSize, string? sha256)
     {
         public ProductTask Task { get; } = task;
+        public string ProductId { get; } = productId;
+        public string Version { get; } = version;
+        public Uri? Url { get; } = url;
         public string ZipPath { get; } = zipPath;
+        public long ExpectedSize { get; } = expectedSize;
+        public string? Sha256 { get; } = sha256;
         public DownloadProgress Progress { get; } = new();
         public CancellationTokenSource? Cts { get; set; }
         /// <summary>上一次下载的任务。继续下载前要等它释放 .part 文件。</summary>
@@ -353,15 +359,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (product.IsBusy || !product.CanDownload)
             return;
 
+        // 与清单写入同在界面线程；在任何异步操作或状态通知前捕获本次发布。
+        var url = Settings.UseGitHub && product.OriginUrl is { } origin ? origin : product.DownloadUrl;
+        Uri.TryCreate(CanApi.BaseUri, url, out var uri);
+        var transfer = new Transfer(task, product.Id, product.LatestVersion, uri,
+            PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion),
+            product.DownloadSize, product.Sha256);
+
         product.CurrentTask = task;
-        product.TotalBytes = product.DownloadSize;
+        product.TotalBytes = transfer.ExpectedSize;
         product.DownloadedBytes = 0;
         product.Speed = 0;
         product.Progress = 0;
         product.PhaseText = TaskTitle(product);
         product.TransferText = "等待其他下载完成";
         product.State = ProductState.Queued;
-        _transfers[product] = new Transfer(task, PackageInstaller.CachePath(Settings.CacheFolderPath, product.Id, product.LatestVersion));
+        _transfers[product] = transfer;
 
         Pump();
     }
@@ -389,9 +402,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void Start(ProductViewModel product, Transfer transfer)
     {
-        // 下载源：本站中转（默认）或 GitHub 原始地址
-        var url = Settings.UseGitHub && product.OriginUrl is { } origin ? origin : product.DownloadUrl;
-        if (!Uri.TryCreate(CanApi.BaseUri, url, out var uri))
+        if (transfer.Url is not { } uri)
         {
             Fail(product, transfer, "下载失败", new InvalidDataException("没有可用的下载地址。"));
             return;
@@ -403,12 +414,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cts = new CancellationTokenSource();
         transfer.Cts = cts;
         transfer.LastBytes = -1;
-        Log.Info($"开始下载 {product.Id} {product.LatestVersion}（{(Settings.UseGitHub ? "GitHub" : "本站")}）→ {transfer.ZipPath}");
-        transfer.Run = RunAsync(product, transfer, uri, transfer.Run, cts.Token);
+        Log.Info($"开始下载 {transfer.ProductId} {transfer.Version}（{uri.Host}）→ {transfer.ZipPath}");
+        transfer.Run = RunAsync(product, transfer, transfer.Run, cts.Token);
     }
 
     /// <summary>下载，然后校验、安装。暂停、取消时下载被取消，状态已由调用方设置好。</summary>
-    private async Task RunAsync(ProductViewModel product, Transfer transfer, Uri url, Task? previous, CancellationToken ct)
+    private async Task RunAsync(ProductViewModel product, Transfer transfer, Task? previous, CancellationToken ct)
     {
         if (previous is not null)
         {
@@ -418,8 +429,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         try
         {
-            var expectedSize = product.DownloadSize;
-            await Task.Run(() => PackageInstaller.DownloadAsync(url, transfer.ZipPath, expectedSize, transfer.Progress,
+            await Task.Run(() => PackageInstaller.DownloadAsync(transfer.Url!, transfer.ZipPath, transfer.ExpectedSize, transfer.Progress,
                 SpeedLimitPerDownload, ct), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -435,7 +445,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         if (ct.IsCancellationRequested || !_transfers.ContainsKey(product))
             return;
-        Log.Info($"下载完成 {product.Id} {product.LatestVersion}（{transfer.Progress.Total} 字节）");
+        Log.Info($"下载完成 {transfer.ProductId} {transfer.Version}（{transfer.Progress.Total} 字节）");
         product.Speed = 0;
         product.State = ProductState.Installing;
         Pump();
@@ -464,7 +474,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try
         {
             // 发布方提供了 SHA-256 时总是核对；“下载完成后校验文件”另外完整读取一遍压缩包
-            var sha256 = product.Sha256;
+            var sha256 = transfer.Sha256;
             if (sha256 is not null || Settings.VerifyAfterDownload)
             {
                 product.PhaseText = "正在校验文件…";
@@ -491,8 +501,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ProductTask.Update => "正在更新…",
                 _ => "正在安装…"
             };
-            var version = product.LatestVersion;
-            var record = await Task.Run(() => PackageInstaller.Install(zip, product.Id, version, installDir));
+            var record = await Task.Run(() => PackageInstaller.Install(zip, transfer.ProductId, transfer.Version, installDir));
             Log.Info($"已安装 {product.Id} {record.Version} → {record.Path}（{record.Files.Count} 个文件）");
             product.InstalledVersion = record.Version;
             product.InstallPath = record.Path;
