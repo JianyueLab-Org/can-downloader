@@ -3,6 +3,7 @@
     <Project Path="src/Downloader/Downloader.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DownloadChecks/DownloadChecks.csproj" />
     <Project Path="tests/InstallerChecks/InstallerChecks.csproj" />
   </Folder>
 </Solution>
