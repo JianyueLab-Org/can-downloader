@@ -48,6 +48,21 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 
 安装软件：Windows 和 macOS 的安装包是 zip（macOS 里是 `.app`，整个包装进安装目录，“打开”用 `open`），Linux 是 tar.gz（保留可执行权限）；软件库里写的 `xxx.exe` 在 macOS / Linux 上是去掉 `.exe` 的程序名。
 
+Linux 安装包同时提供 `install.sh` 和 `uninstall.sh`，默认安装到 `~/.local/bin/CAN/downloader/`，一个程序一个子文件夹。安装后可运行该目录的 `uninstall.sh`，选择是否清理下载器设置、日志和缓存；也支持 `--keep-data` / `--remove-data`。其他 CAN 客户端及已安装的软件不会删除，`install.sh --uninstall` 仍可使用。
+
+macOS 安装包解压后包含 `CAN Downloader.app`、`install.sh` 和 `uninstall.sh`：
+
+```bash
+sh install.sh                                      # 安装到 /Applications/CAN/downloader
+sh install.sh "$HOME/Applications/CAN/downloader"   # 安装到当前用户目录
+sh uninstall.sh                                    # 卸载默认目录中的下载器
+sh uninstall.sh "$HOME/Applications/CAN/downloader" # 卸载当前用户目录中的下载器
+```
+
+macOS 同样一个程序一个子文件夹。安装后也可运行 `.app/Contents/Resources/uninstall.sh`，自动定位应用所在目录。覆盖安装或卸载前请先退出下载器；卸载保留用户数据、已安装客户端及 CAN 下的其他程序。
+
+上述 `uninstall.sh` 仅用于卸载 CAN Downloader，不用于卸载客户端。客户端通过下载器中的“卸载”功能、客户端自带的卸载器（如有）或手动删除其独立目录进行卸载；下载器中的“卸载”只删除该客户端记录的文件和对应安装记录，不影响其他客户端。
+
 ## 目录（便携）
 
 所有目录默认都在下载器程序所在的目录下，整个目录复制走即可带走。程序目录不能写时放到用户目录：macOS 的 `.app` 包（`~/Library/Application Support/CAN Downloader`）、Linux 不可写目录（如 `/opt`，数据放 `~/.local/share/CAN Downloader`，或 `$XDG_DATA_HOME`）。Windows 始终在 exe 所在目录。
