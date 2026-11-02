@@ -12,7 +12,7 @@ public sealed class UpdateManifest
 {
     public DateTimeOffset PublishedAt { get; set; }
     public string Server { get; set; } = "";
-    /// <summary>下载器自身的最新版本。API 目前不提供，为 null 时视为已是最新。</summary>
+    /// <summary>下载器自身的最新版本，来自 apps.can-downloader。</summary>
     public LauncherRelease? Launcher { get; set; }
     public List<ManifestCategory> Categories { get; set; } = [];
     public List<ManifestProduct> Products { get; set; } = [];
@@ -164,8 +164,9 @@ public static class ManifestSource
         var entries = catalog.Products.ToDictionary(p => p.Id);
         var order = catalog.Products.Select(p => p.Id).ToList();
 
-        // CAN 客户端合集（同一个版本）与独立发布的程序（各自的版本）。没有本机平台安装包的软件不列出
-        var bundle = latest.Clients.Select(c => Package(c.Key, c.Value.Download, c.Value.Origin, c.Value.Size, null, c.Value.Platforms)
+        // 同名条目以独立发布元数据为准；clients 保留给旧消费者，不能重复显示。
+        var bundle = latest.Clients.Where(c => !latest.Apps.ContainsKey(c.Key))
+            .Select(c => Package(c.Key, c.Value.Download, c.Value.Origin, c.Value.Size, null, c.Value.Platforms)
             is not { } package ? null : Product(c.Key, entries.GetValueOrDefault(c.Key),
             c.Value.Version.Length > 0 ? c.Value.Version : latest.Version, latest.PublishedAt, package,
             latest.Notes, prerelease: false, changelog: null));

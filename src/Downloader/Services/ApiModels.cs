@@ -24,7 +24,7 @@ public sealed class ClientsLatest
     public Dictionary<string, ClientBuild> Clients { get; set; } = [];
 
     /// <summary>
-    /// 独立发布的程序（can-pilot、can-downloader），各自有版本号。旧版 API 没有这一项。
+    /// 独立发布的程序（audio-for-can、atis-for-can、can-pilot、can-downloader），各自有版本号。
     /// can-downloader 是下载器自己，用于自更新，不出现在软件库里。
     /// </summary>
     public Dictionary<string, AppBuild> Apps { get; set; } = [];
