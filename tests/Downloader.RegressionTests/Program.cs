@@ -41,6 +41,51 @@ var count = 0;
 AppBuilder.Configure<Application>().UseHeadless(new AvaloniaHeadlessPlatformOptions()).SetupWithoutStarting();
 try
 {
+    Run("C# 客户端清单保留独立版本、摘要和可执行文件且不重复", () =>
+    {
+        var latest = JsonSerializer.Deserialize<ClientsLatest>("""
+            {"clients":{"audio-for-can":{"version":"2.2.36","download":"https://example.invalid/retired.zip"}},
+             "apps":{
+               "audio-for-can":{"version":"3.0.8","size":101,"sha256":"audio-digest","download":"https://api.ceruleanavi.net/api/v1/clients/download/audio-for-can?v=3.0.8"},
+               "atis-for-can":{"version":"3.0.5","size":202,"sha256":"atis-digest","download":"https://api.ceruleanavi.net/api/v1/clients/download/atis-for-can?v=3.0.5"},
+               "can-downloader":{"version":"3.0.2","size":303,"sha256":"launcher-digest","download":"https://api.ceruleanavi.net/api/v1/clients/download/can-downloader?v=3.0.2"}}}
+            """, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        // 用真实显示目录，在任意运行平台注入该平台包；不访问线上发布。
+        using var catalogStream = typeof(ManifestSource).Assembly.GetManifestResourceStream("catalog.json")!;
+        var catalog = JsonSerializer.Deserialize<Catalog>(catalogStream, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
+        })!;
+        foreach (var app in latest.Apps.Values)
+            app.Platforms = new()
+            {
+                [PlatformInfo.PackageKeys[0]] = new() { Download = app.Download, Size = app.Size, Sha256 = app.Sha256 }
+            };
+        var manifest = (UpdateManifest)typeof(ManifestSource).GetMethod("Build", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [latest, catalog])!;
+        Check(manifest.Products.Count == 2);
+        var audio = manifest.Products.Single(p => p.Id == "audio-for-can");
+        var atis = manifest.Products.Single(p => p.Id == "atis-for-can");
+        Check(audio.Version == "3.0.8" && audio.Size == 101 && audio.Sha256 == "audio-digest");
+        Check(audio.Executable == PlatformInfo.ExecutableName("ControllerClient.exe"));
+        Check(audio.DownloadUrl == latest.Apps["audio-for-can"].Download);
+        Check(atis.Version == "3.0.5" && atis.Size == 202 && atis.Sha256 == "atis-digest");
+        Check(atis.Executable == PlatformInfo.ExecutableName("atis-for-can.exe"));
+        Check(manifest.Launcher is { Version: "3.0.2", Size: 303, Sha256: "launcher-digest" });
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var app in latest.Apps.Values)
+                app.Platforms = new()
+                {
+                    ["win-x64"] = new() { Download = app.Download, Size = app.Size, Sha256 = app.Sha256 }
+                };
+            var windowsOnly = (UpdateManifest)typeof(ManifestSource).GetMethod("Build", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, [latest, catalog])!;
+            Check(windowsOnly.Products.Count == 0 && windowsOnly.Launcher is null);
+        }
+    });
     foreach (var mode in new[] { "downloading", "queued", "running" })
     foreach (var withHash in new[] { false, true })
     {
