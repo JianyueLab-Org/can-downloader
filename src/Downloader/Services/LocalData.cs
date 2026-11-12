@@ -34,6 +34,14 @@ public static class AppPaths
         return Path.GetFullPath(path, Base);
     }
 
+    /// <summary>保存用的路径：数据目录里的路径存为相对路径（整个目录搬走、复制后仍然有效），其他位置存完整路径。</summary>
+    public static string ToStored(string path)
+    {
+        var full = Resolve(path);
+        var relative = Path.GetRelativePath(Base, full);
+        return relative == "." || relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? full : relative;
+    }
+
     public static bool IsWritable(string directory)
     {
         try
@@ -94,10 +102,10 @@ public static class LocalData
     /// <summary>先写临时文件再替换，避免写到一半时程序退出留下损坏的文件。</summary>
     public static void Save<T>(string name, T value, bool throwOnError = false)
     {
+        var path = Path.Combine(Root, name);
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            var path = Path.Combine(Root, name);
-            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             if (OperatingSystem.IsWindows())
             {
                 Directory.CreateDirectory(Root);
@@ -124,6 +132,8 @@ public static class LocalData
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            try { File.Delete(temp); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { /* 留下的临时文件不影响 */ }
             if (throwOnError)
                 throw;
             // 保存失败不影响本次使用
@@ -197,7 +207,10 @@ public sealed class InstallRecord
     public DateTimeOffset InstalledAt { get; set; }
 }
 
-/// <summary>本机已安装的软件，保存在 installs.json。安装目录已被手动删除的记录在读取时丢弃。</summary>
+/// <summary>
+/// 本机已安装的软件，保存在 installs.json。安装目录已被手动删除的记录在读取时丢弃。
+/// 数据目录里的安装位置存为相对路径（与设置一样），整个目录搬走或复制后指向新位置的软件，而不是原来那份。
+/// </summary>
 public static class LocalInstalls
 {
     internal static readonly object Sync = new();
@@ -212,6 +225,8 @@ public static class LocalInstalls
                 return _records;
             InstallationTransaction.Recover();
             var loaded = LocalData.Load<List<InstallRecord>>(FileName) ?? [];
+            foreach (var record in loaded.Where(r => r.Path.Length > 0))
+                record.Path = AppPaths.Resolve(record.Path);
             _records = loaded
                 .Where(r => r.Id.Length > 0 && Directory.Exists(r.Path))
                 .GroupBy(r => r.Id)
@@ -225,12 +240,17 @@ public static class LocalInstalls
         lock (Sync) return Records.GetValueOrDefault(id);
     }
 
+    public static IReadOnlyList<InstallRecord> All()
+    {
+        lock (Sync) return Records.Values.ToList();
+    }
+
     public static void Set(InstallRecord record)
     {
         lock (Sync)
         {
             var next = new Dictionary<string, InstallRecord>(Records) { [record.Id] = record };
-            LocalData.Save(FileName, next.Values.ToList(), throwOnError: true);
+            LocalData.Save(FileName, ToStored(next.Values), throwOnError: true);
             _records = next;
         }
     }
@@ -241,9 +261,16 @@ public static class LocalInstalls
         {
             var next = new Dictionary<string, InstallRecord>(Records);
             if (!next.Remove(id)) return;
-            LocalData.Save(FileName, next.Values.ToList(), throwOnError: true);
+            LocalData.Save(FileName, ToStored(next.Values), throwOnError: true);
             _records = next;
         }
     }
 
+    /// <summary>写入文件用的副本：安装位置换成 <see cref="AppPaths.ToStored"/> 的形式，内存里仍是完整路径。</summary>
+    private static List<InstallRecord> ToStored(IEnumerable<InstallRecord> records) =>
+        records.Select(r => new InstallRecord
+        {
+            TransactionId = r.TransactionId, Id = r.Id, Version = r.Version, Path = AppPaths.ToStored(r.Path),
+            Files = r.Files, InstalledAt = r.InstalledAt
+        }).ToList();
 }

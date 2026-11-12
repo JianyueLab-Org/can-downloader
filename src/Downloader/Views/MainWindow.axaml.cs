@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Downloader.Services;
@@ -9,7 +11,13 @@ namespace Downloader.Views;
 
 public partial class MainWindow : Window
 {
-    public MainWindow() => InitializeComponent();
+    public MainWindow()
+    {
+        InitializeComponent();
+        // 对话框打开期间，键盘只作用于对话框：先于窗口里的控件拦下按键与文字输入
+        AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(TextInputEvent, OnPreviewTextInput, RoutingStrategies.Tunnel);
+    }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
 
@@ -17,15 +25,35 @@ public partial class MainWindow : Window
     {
         base.OnDataContextChanged(e);
         if (DataContext is MainWindowViewModel vm)
+        {
             vm.MessageRequested += async (_, m) => await ShowMessageAsync(m.Title, m.Message);
+            vm.TaskFinished += (_, m) => Notify(m.Title, m.Message);
+        }
     }
 
-    /// <summary>在窗口内的遮罩层上显示模态对话框，返回用户点击的按钮。</summary>
+    /// <summary>下载与安装完成：设置了“完成时通知”且窗口不在眼前（隐藏到托盘、最小化或在后台）时发系统通知。</summary>
+    private void Notify(string title, string message)
+    {
+        if (Vm.Settings.NotifyWhenFinished && (!IsVisible || !IsActive || WindowState == WindowState.Minimized))
+            SystemNotification.Show(title, message);
+    }
+
+    // ========== 窗口内模态对话框 ==========
+
+    /// <summary>最上层的对话框；没有打开的对话框时为 null。</summary>
+    private DialogView? TopDialog => DialogLayer.Children.OfType<DialogView>().LastOrDefault();
+
+    /// <summary>
+    /// 在窗口内的遮罩层上显示模态对话框，返回用户点击的按钮。
+    /// 打开时焦点移到对话框的按钮上，键盘输入不会落到遮罩后面的控件；关闭后焦点回到原来的控件。
+    /// </summary>
     public async Task<DialogResult> ShowDialogAsync(DialogView dialog)
     {
+        var previousFocus = FocusManager?.GetFocusedElement();
         DialogLayer.Children.Add(dialog);
         DialogLayer.IsVisible = true;
-        dialog.Focus();
+        // 加入可视树、完成布局之后才能取得焦点
+        Avalonia.Threading.Dispatcher.UIThread.Post(dialog.FocusInitial, Avalonia.Threading.DispatcherPriority.Loaded);
         try
         {
             return await dialog.Result;
@@ -34,7 +62,37 @@ public partial class MainWindow : Window
         {
             DialogLayer.Children.Remove(dialog);
             DialogLayer.IsVisible = DialogLayer.Children.Count > 0;
+            if (TopDialog is { } below)
+                below.FocusInitial();
+            else
+                previousFocus?.Focus();
         }
+    }
+
+    private static bool IsInside(object? source, Visual container) =>
+        source is Visual visual && (ReferenceEquals(visual, container) || container.IsVisualAncestorOf(visual));
+
+    private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (TopDialog is not { } dialog)
+            return;
+        if (e.Key == Key.Escape)
+        {
+            dialog.Dismiss();
+            e.Handled = true;
+        }
+        else if (!IsInside(e.Source, dialog))
+        {
+            // 焦点还在遮罩后面：拉回对话框，这次按键不交给后面的控件
+            dialog.FocusInitial();
+            e.Handled = true;
+        }
+    }
+
+    private void OnPreviewTextInput(object? sender, TextInputEventArgs e)
+    {
+        if (TopDialog is { } dialog && !IsInside(e.Source, dialog))
+            e.Handled = true;
     }
 
     /// <summary>显示只有“确定”按钮的提示。</summary>
@@ -109,6 +167,8 @@ public partial class MainWindow : Window
 
     public void Repair(ProductViewModel product) => Vm.Repair(product);
 
+    public void Launch(ProductViewModel product) => Vm.Launch(product);
+
     public Task OpenFolderAsync(ProductViewModel product) => OpenFolderAsync("安装目录", product.InstallPath);
 
     /// <summary>在文件管理器中打开目录；目录不存在时提示。</summary>
@@ -140,7 +200,14 @@ public partial class MainWindow : Window
 
     private void OnMinimizeClick(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
-    private void OnExitClick(object? sender, RoutedEventArgs e) => Close();
+    /// <summary>✕：设置了“关闭窗口时最小化到系统托盘”时只隐藏窗口，下载与安装在后台继续；否则退出。</summary>
+    private void OnExitClick(object? sender, RoutedEventArgs e)
+    {
+        if (Avalonia.Application.Current is App { CanHideToTray: true })
+            Hide();
+        else
+            Close();
+    }
 
     private async void OnSettingsClick(object? sender, RoutedEventArgs e)
     {

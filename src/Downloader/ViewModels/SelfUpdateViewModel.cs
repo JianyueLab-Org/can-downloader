@@ -28,12 +28,17 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
 {
     private bool _simulateOffline;
     private readonly bool _autoUpdate;
+    private readonly SettingsViewModel _settings;
     private CancellationTokenSource? _downloadCts;
+    /// <summary>上次更新失败：重试前重新获取发布信息（发布可能已更新，旧的大小、校验值对不上新安装包）。</summary>
+    private bool _refreshBeforeRetry;
 
+    /// <param name="settings">下载缓存目录与限速。</param>
     /// <param name="simulateOffline">演示连接失败（命令行 --offline）。</param>
     /// <param name="autoUpdate">从主界面“更新并重启”进入时，发现新版本后直接下载。</param>
-    public SelfUpdateViewModel(bool simulateOffline = false, bool autoUpdate = false)
+    public SelfUpdateViewModel(SettingsViewModel settings, bool simulateOffline = false, bool autoUpdate = false)
     {
+        _settings = settings;
         _simulateOffline = simulateOffline;
         _autoUpdate = autoUpdate;
     }
@@ -104,41 +109,77 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
             return;
         }
 
-        if (Manifest.Launcher is not { } release || !VersionUtil.IsNewer(release.Version, AppInfo.Version))
+        if (!ShowRelease())
         {
-            Stage = SelfUpdateStage.UpToDate;
-            IsIndeterminate = false;
-            Progress = 100;
-            StatusText = "已是最新版本";
-            DetailText = $"{AppInfo.Name} {AppInfo.Version}";
-            await Task.Delay(300);
-            Completed?.Invoke(this, Manifest!);
+            await CompleteUpToDateAsync();
             return;
         }
 
+        if (_autoUpdate)
+            await UpdateNowAsync();
+    }
+
+    /// <summary>有新版本时显示版本与更新说明，返回 true；已是最新时返回 false。</summary>
+    private bool ShowRelease()
+    {
+        if (Manifest?.Launcher is not { } release || !VersionUtil.IsNewer(release.Version, AppInfo.Version))
+            return false;
         LatestVersion = release.Version;
         ReleaseInfo = $"{release.ReleaseDate} 发布{(release.Size > 0 ? $" · {Format.Size(release.Size)}" : "")}{(release.Prerelease ? " · 预发布" : "")}";
         IsMandatory = release.Mandatory;
         Notes = release.Notes;
         OnPropertyChanged(nameof(Notes));
         Stage = SelfUpdateStage.Available;
+        return true;
+    }
 
-        if (_autoUpdate)
-            await UpdateNowAsync();
+    private async Task CompleteUpToDateAsync()
+    {
+        Stage = SelfUpdateStage.UpToDate;
+        IsIndeterminate = false;
+        Progress = 100;
+        StatusText = "已是最新版本";
+        DetailText = $"{AppInfo.Name} {AppInfo.Version}";
+        await Task.Delay(300);
+        Completed?.Invoke(this, Manifest!);
     }
 
     /// <summary>下载新版本、核对 SHA-256、交给新版本替换并重启。失败时回到“发现新版本”并显示原因。</summary>
     [RelayCommand]
     private async Task UpdateNowAsync()
     {
-        if (Manifest?.Launcher is not { } release)
-            return;
         UpdateErrorText = "";
         if (SelfUpdater.CannotReplaceReason is { } reason)
         {
             UpdateErrorText = reason;
             return;
         }
+        if (_refreshBeforeRetry)
+        {
+            Stage = SelfUpdateStage.Checking;
+            IsIndeterminate = true;
+            StatusText = "正在获取最新发布信息…";
+            DetailText = $"正在连接 {CanApi.ApiHost}";
+            try
+            {
+                CanApi.Shared.Configure(_settings);
+                Manifest = await ManifestSource.FetchAsync();
+                _refreshBeforeRetry = false;
+            }
+            catch (ApiException ex)
+            {
+                Stage = SelfUpdateStage.Available;
+                UpdateErrorText = $"无法获取发布信息：{ex.Message}";
+                return;
+            }
+            if (!ShowRelease())
+            {
+                await CompleteUpToDateAsync();
+                return;
+            }
+        }
+        if (Manifest?.Launcher is not { } release)
+            return;
         if (!Uri.TryCreate(CanApi.BaseUri, release.DownloadUrl, out var url))
         {
             UpdateErrorText = "发布信息里没有下载地址。";
@@ -152,13 +193,16 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
         Progress = 0;
         StatusText = $"正在下载 {AppInfo.Name} {release.Version}";
         DetailText = $"正在连接 {url.Host}…";
-        var zip = Path.Combine(AppPaths.Downloads, $"CAN-Downloader-{release.Version}{release.PackageExtension}");
+        // 与软件下载一样使用设置里的下载缓存目录与限速
+        var zip = Path.Combine(_settings.CacheFolderPath, $"CAN-Downloader-{release.Version}{release.PackageExtension}");
         Log.Info($"开始更新下载器 {AppInfo.Version} → {release.Version}");
 
         try
         {
+            CanApi.Shared.Configure(_settings);
             var progress = new DownloadProgress();
-            var download = Task.Run(() => PackageInstaller.DownloadAsync(url, zip, release.Size, progress, () => 0, token), token);
+            var download = Task.Run(() => PackageInstaller.DownloadAsync(url, zip, release.Size, progress,
+                () => _settings.SpeedLimitBytes, token), token);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             long last = -1;
             var speed = 0d;
@@ -238,6 +282,7 @@ public sealed partial class SelfUpdateViewModel : ViewModelBase
     private void Fail(string title, Exception ex)
     {
         Log.Error($"更新下载器：{title}", ex);
+        _refreshBeforeRetry = true;
         Stage = SelfUpdateStage.Available;
         UpdateErrorText = $"{title}：{ex.Message}";
     }

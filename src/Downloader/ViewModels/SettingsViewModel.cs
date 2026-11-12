@@ -42,15 +42,31 @@ public sealed partial class SettingsViewModel : ViewModelBase
         return settings;
     }
 
+    /// <summary>
+    /// 保存到 data/settings.json。写入失败时抛出 <see cref="IOException"/> 或 <see cref="UnauthorizedAccessException"/>，
+    /// 修改保持未保存（IsDirty 不变），由设置窗口提示。
+    /// </summary>
     public void Save()
     {
         var values = Snapshot();
-        values[nameof(InstallRoot)] = RelativeToBase(InstallRoot);
-        values[nameof(CacheFolder)] = RelativeToBase(CacheFolder);
-        LocalData.Save(FileName, values);
+        values[nameof(InstallRoot)] = AppPaths.ToStored(InstallRoot);
+        values[nameof(CacheFolder)] = AppPaths.ToStored(CacheFolder);
+        try
+        {
+            LocalData.Save(FileName, values, throwOnError: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error("保存设置失败", ex);
+            throw;
+        }
         MarkSaved();
+        Saved?.Invoke(this, EventArgs.Empty);
         Log.Info($"设置已保存：安装目录 {InstallRoot}，缓存 {CacheFolder}，询问安装位置 {AskInstallLocation}，下载源 {DownloadSource}，代理 {ProxyMode}");
     }
+
+    /// <summary>设置已写入文件（“确定”或“应用”）。开机启动等需要立即生效的设置在这里处理。</summary>
+    public event EventHandler? Saved;
 
     /// <summary>当前设置的副本，“取消”时用 <see cref="Restore"/> 还原。</summary>
     public Dictionary<string, object?> Snapshot() => Persisted.ToDictionary(p => p.Name, p => p.GetValue(this));
@@ -63,13 +79,6 @@ public sealed partial class SettingsViewModel : ViewModelBase
                 property.SetValue(this, value);
         }
         MarkSaved();
-    }
-
-    private static string RelativeToBase(string path)
-    {
-        var full = AppPaths.Resolve(path);
-        var relative = Path.GetRelativePath(AppPaths.Base, full);
-        return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? full : relative;
     }
 
     /// <summary>有未应用的修改时启用“应用”按钮。</summary>
@@ -137,6 +146,15 @@ public sealed partial class SettingsViewModel : ViewModelBase
 
     public bool UseGitHub => DownloadSource == SourceGitHub;
     [ObservableProperty] private string? _checkInterval = "每 6 小时";
+
+    /// <summary>自动检查更新的间隔；“仅启动时”为 null（不定时检查）。</summary>
+    public TimeSpan? CheckIntervalTime => CheckInterval switch
+    {
+        "每小时" => TimeSpan.FromHours(1),
+        "每 6 小时" => TimeSpan.FromHours(6),
+        "每天" => TimeSpan.FromDays(1),
+        _ => null
+    };
     [ObservableProperty] private bool _autoUpdateInstalled;
     [ObservableProperty] private bool _showNewProducts = true;
 

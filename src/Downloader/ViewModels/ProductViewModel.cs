@@ -59,8 +59,11 @@ public sealed partial class ProductViewModel : LibraryEntry
     [ObservableProperty] private string _description = "";
     [ObservableProperty] private string _releaseDate = "";
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PrimaryText), nameof(IsPrimaryEnabled))]
+    [NotifyPropertyChangedFor(nameof(PrimaryText), nameof(IsPrimaryEnabled), nameof(CanLaunch))]
     private string? _executable;
+
+    /// <summary>有可打开的程序（与是否有新版本、能否下载无关）。</summary>
+    public bool CanLaunch => Executable is not null;
     [ObservableProperty] private string _requiresText = "";
 
     /// <summary>下载地址：本站中转与 GitHub 原始地址，按设置里的下载源选择。</summary>

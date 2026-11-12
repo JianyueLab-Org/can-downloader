@@ -26,15 +26,16 @@ bash packaging/build.sh                                   # 在 macOS ARM64 / Li
 | 登录窗口：**登录后才能进入主界面，没有离线模式**。OAuth 2.1 授权码 + PKCE（公开客户端，在 https://platform.ceruleanavi.net 注册，client_id 是 `OAuthLogin.RegisteredClientId`，环境变量 `CAN_OAUTH_CLIENT_ID` 可覆盖）：浏览器打开授权页，`127.0.0.1` 随机端口收回调（注册的回调地址 `http://127.0.0.1/callback`，端口不参与匹配），scope `openid profile email offline_access`；“自动登录”保存 DPAPI 加密的 refresh 令牌（每次刷新都换新，要保存新的）；退出登录时吊销。下载器不接触密码 | `Views/LoginWindow.axaml`，`ViewModels/LoginViewModel.cs`，`Services/OAuthLogin.cs` |
 | CAN API 客户端（错误码转中文、代理与超时取自设置；OAuth 请求经 `SendRawAsync`） | `Services/CanApi.cs`、`Services/ApiModels.cs` |
 | 软件清单：由 `GET /api/v1/clients/latest` 生成——`apps` 包括 audio-for-can、atis-for-can、can-pilot、can-downloader，各自有版本、SHA-256、发布说明。`clients` 保留给旧消费者，同名条目优先用 `apps` 且只显示一次；`apps.can-downloader` 用于自更新，不进软件库。显示信息来自 `Assets/catalog.json`，Audio 运行 `ControllerClient.exe`、ATIS 运行 `atis-for-can.exe`。**软件库完全由 API 决定**，不要在代码里写死软件列表 | `ViewModels/Manifest.cs`，`Assets/catalog.json` |
-| 自更新：下载 → 核对 SHA-256 → 解压为 `<原名>.new` → 以 `--apply-update <pid>` 启动它并退出 → 新版本复制自己到原位置再启动。替换的对象：Windows `Downloader.exe`、Linux `Downloader`、macOS 整个 `CAN Downloader.app`（旧包先改名 `.old`）。**不要在运行中给程序文件（或所在的 .app）改名后继续运行**（单文件程序之后加载程序集会失败）。程序目录不可写（如 Linux 的 /opt）时不自更新 | `Services/SelfUpdater.cs`、`ViewModels/SelfUpdateViewModel.cs` |
+| 自更新：下载 → 核对 SHA-256 → 解压为 `<原名>.new` → 以 `--apply-update <pid>` 启动它并退出 → 新版本先把自己完整复制到原位置旁的 `.tmp`，再一步替换原程序（`File.Replace`，原程序留作 `.old`，下次启动删除），失败时原程序不变。替换的对象：Windows `Downloader.exe`、Linux `Downloader`、macOS 整个 `CAN Downloader.app`（新包先复制到 `.tmp`，旧包改名 `.old` 后换上）。**不要在运行中给程序文件（或所在的 .app）改名后继续运行**（单文件程序之后加载程序集会失败）。程序目录不可写（如 Linux 的 /opt）时不自更新。自更新也使用设置里的下载缓存目录与限速；失败后重试前重新获取发布信息 | `Services/SelfUpdater.cs`、`ViewModels/SelfUpdateViewModel.cs` |
 | 平台：Windows x64、macOS（仅 `osx-arm64`，直接打包 ARM64 单文件程序的 `.app`）、Linux（通用 tar.gz，不单独打发行版包）。按平台挑安装包：API 的 `platforms`（可选，键是 `win-x64`/`osx-arm64`/`linux-x64`…）优先，macOS 优先 ARM64、兼容客户端的 `osx-universal` 通用包；没有时顶层地址是 Windows 版，其他平台把 GitHub 地址的 `-win-x64.zip` 换成 `-osx-arm64.zip`/`-linux-x64.tar.gz`，SHA-256 查同一发布的 `SHA256SUMS`；都没有的软件不列出。软件库的 `xxx.exe` 在其他平台去掉 `.exe`，macOS 打开安装目录里的 `.app` | `Services/Platform.cs`、`ViewModels/Manifest.cs`、`packaging/` |
-| 下载（续传、限速、本站 / GitHub 下载源）、zip / tar.gz 校验、解压安装（保留可执行权限，.app 顶层目录不去掉）、卸载 | `Services/PackageInstaller.cs` |
-| **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、自动登录的 refresh 令牌）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。Windows 不要改回 %LocalAppData%。只有 macOS 的 .app 包和不可写的程序目录（Linux /opt）才放用户目录（`~/Library/Application Support/CAN Downloader`、`~/.local/share/CAN Downloader`）；`AppPaths.Program` 是程序目录，`AppPaths.Base` 是数据目录 | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
+| 下载（续传、限速、本站 / GitHub 下载源）、zip / tar.gz 校验（zip 逐条核对 CRC32）、解压安装（保留可执行权限，.app 顶层目录不去掉）、卸载。旧版本地址会被 API 重定向到最新发布：大小与发布信息不符时不写入数据，抛 `ReleaseChangedException`，主界面重新获取清单后按新发布重新下载；续传核对 Content-Range 并带 If-Range（`.part.id` 里存强 ETag / Last-Modified） | `Services/PackageInstaller.cs` |
+| 单实例（`data/instance.lock`，再次打开时通知已运行的窗口显示）、系统托盘（“关闭窗口时最小化到系统托盘”）、开机启动（Windows Run 注册表、macOS LaunchAgent、Linux autostart）、完成通知（Windows 借 PowerShell 弹 Toast、macOS osascript、Linux notify-send） | `Services/DesktopIntegration.cs`、`App.axaml.cs` |
+| **目录都在 exe 所在目录下**（便携）：`data/`（设置、安装记录、自动登录的 refresh 令牌）、`logs/`（每天一个文件）、`downloads/`、`apps/`（默认安装目录）。Windows 不要改回 %LocalAppData%。只有 macOS 的 .app 包和不可写的程序目录（Linux /opt）才放用户目录（`~/Library/Application Support/CAN Downloader`、`~/.local/share/CAN Downloader`）；`AppPaths.Program` 是程序目录，`AppPaths.Base` 是数据目录。设置和安装记录（`installs.json`）里数据目录内的路径都存相对路径（`AppPaths.ToStored`） | `Services/LocalData.cs`（`AppPaths`）、`Services/Log.cs` |
 | 安装位置：设置里的默认安装目录 + 安装对话框里询问（设置可关闭“安装时询问安装位置”，关闭后没有其他可选项时不弹对话框） | `Views/InstallView.axaml`、`ViewModels/InstallViewModel.cs`、`Views/FolderPicker.cs` |
-| 主界面：工具栏（检查更新、全部更新、设置、⋯、账号）、提示条（新上架、可更新、下载器新版本、检查失败）、左侧按分类分组的软件库、右侧软件详情与下载进度 | `Views/MainWindow.axaml`、`Views/ProductView.axaml`，`ViewModels/MainWindowViewModel.cs`、`ProductViewModel.cs` |
+| 主界面：工具栏（检查更新、全部更新、设置、⋯、账号）、提示条（新上架、可更新、下载器新版本、检查失败）、左侧按分类分组的软件库（清单里没有、本机装着的软件按安装记录显示为“已下架”）、右侧软件详情与下载进度。按设置的间隔定时检查更新；开启自动更新时启动时已有的新版本也会更新。离开主界面（退出登录、更新并重启）前 `StopAsync` 取消下载并等安装结束 | `Views/MainWindow.axaml`、`Views/ProductView.axaml`，`ViewModels/MainWindowViewModel.cs`、`ProductViewModel.cs` |
 | 安装对话框（位置、组件、依赖、磁盘空间）、设置（常规 / 下载 / 更新 / 网络） | `Views/InstallView.axaml`、`Views/SettingsWindow.axaml` + `Views/Settings/*.axaml` |
 
-下载在后台线程进行，`MainWindowViewModel` 用 `DispatcherTimer` 把进度刷新到界面；遵守设置里的同时下载数、限速与下载源。设置保存在 `data/settings.json`（`SettingsViewModel` 所有可写公共属性），程序目录内的路径存相对路径；设置窗口“取消”/✕ 会还原。
+下载在后台线程进行，`MainWindowViewModel` 用 `DispatcherTimer` 把进度刷新到界面；遵守设置里的同时下载数、限速与下载源。设置保存在 `data/settings.json`（`SettingsViewModel` 所有可写公共属性），程序目录内的路径存相对路径；设置窗口“取消”/✕ 会还原；写入失败时底部显示原因，修改保持未保存、窗口不关闭。
 
 发布是**单文件**（`Properties/PublishProfiles/<平台>.pubxml`，共用 `SingleFile.props`）：新增数据文件要嵌入程序（`EmbeddedResource`），不要依赖程序旁边的文件。
 
@@ -43,7 +44,7 @@ bash packaging/build.sh                                   # 在 macOS ARM64 / Li
 - **风格**：深色、极简、扁平、紧凑的开发者工具风格；不要 Fluent / Material 观感；不用渐变、玻璃拟态、夸张阴影；跨平台。
 - **不使用 FluentAvalonia**，底层是 Avalonia 自带的 `SimpleTheme`。
 - **字号小**：基础 12，控件高 26。
-- **跨平台**：Windows / macOS / Linux 同一套界面；平台差异只放在 `Services/Platform.cs`、`AppPaths`、`SelfUpdater`、`Shell`，界面里不判断平台。
+- **跨平台**：Windows / macOS / Linux 同一套界面；平台差异只放在 `Services/Platform.cs`、`AppPaths`、`SelfUpdater`、`Shell`、`Services/DesktopIntegration.cs`，界面里不判断平台。
 - **窗口**：无系统标题栏（`WindowDecorations="None"`），拖动工具栏空白处移动；主窗口右上角 — / ✕，边缘由 `ResizeGrips` 缩放；没有底部状态栏。子窗口用 `Views/TitleBar` 自绘标题栏；打开设置时主窗口蒙上暗色遮罩。
 - 设置界面：左侧菜单 + 右侧面板 + 底部 确定/应用/取消，“应用”只在有改动时可用。
 
