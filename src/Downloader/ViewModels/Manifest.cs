@@ -158,6 +158,27 @@ public static class ManifestSource
     /// <summary>下载器自己在 API <c>apps</c> 里的名字，用于自更新，不放进软件库。</summary>
     public const string LauncherAppId = "can-downloader";
 
+    /// <summary>
+    /// 本机装着、清单里却没有（已下架）的软件：显示信息取自 catalog.json，版本是已安装的版本，没有下载地址（不能更新、修复）。
+    /// </summary>
+    public static ManifestProduct Delisted(string id, string installedVersion)
+    {
+        var entry = LoadCatalog().Products.FirstOrDefault(p => p.Id == id);
+        return new ManifestProduct
+        {
+            Id = id,
+            Name = entry?.Name ?? id,
+            Category = entry?.Category ?? OtherCategory,
+            Icon = entry?.Icon ?? id[..Math.Min(2, id.Length)].ToUpperInvariant(),
+            Color = entry?.Color ?? "",
+            Summary = entry?.Summary ?? "",
+            Description = entry?.Description ?? entry?.Summary ?? "",
+            Version = installedVersion,
+            Executable = PlatformInfo.ExecutableName(entry?.Executable ?? id + ".exe"),
+            Requires = entry?.Requires ?? []
+        };
+    }
+
     private static UpdateManifest Build(ClientsLatest latest, Catalog catalog)
     {
         var published = latest.PublishedAt ?? DateTimeOffset.UtcNow;

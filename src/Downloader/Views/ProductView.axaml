@@ -54,6 +54,8 @@
           <Button Classes="icon action" Content="⋯" ToolTip.Tip="更多" IsVisible="{Binding HasMenu}">
             <Button.Flyout>
               <MenuFlyout Placement="BottomEdgeAlignedRight">
+                <!-- 有新版本时主按钮是“更新”，这里仍可打开已安装的版本（不能下载时也可以） -->
+                <MenuItem Header="打开" Click="OnLaunchClick" IsVisible="{Binding IsUpdateState}" IsEnabled="{Binding CanLaunch}" />
                 <MenuItem Header="打开安装目录" Click="OnOpenFolderClick" />
                 <MenuItem Header="校验并修复" Click="OnRepairClick" IsEnabled="{Binding CanDownload}" />
                 <Separator />

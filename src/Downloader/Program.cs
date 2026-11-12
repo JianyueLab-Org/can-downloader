@@ -15,6 +15,13 @@ internal static class Program
         // 自更新的第二步：本次启动只为把新版本复制到原位置，不显示界面
         if (SelfUpdater.TryApplyFromArgs(args))
             return;
+        // 同一个数据目录只运行一个下载器，否则两个进程会互相覆盖安装记录
+        if (!SingleInstance.TryAcquire())
+        {
+            Log.Info("已有下载器在运行，通知它显示窗口后退出");
+            SingleInstance.SignalExisting();
+            return;
+        }
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("未处理的异常", e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("未观察到的任务异常", e.Exception);
         try

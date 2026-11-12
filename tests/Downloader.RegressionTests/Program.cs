@@ -7,6 +7,7 @@ using System.Reflection;
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Downloader.Services;
 using Downloader.ViewModels;
 
@@ -14,6 +15,14 @@ using Downloader.ViewModels;
 if (args.FirstOrDefault() == "--recover")
 {
     InstallationTransaction.Recover();
+    return;
+}
+// 单实例：取得锁后保持指定毫秒数；退出码 0 表示取得了锁，1 表示已有实例。
+if (args.FirstOrDefault() == "--instance")
+{
+    if (!SingleInstance.TryAcquire())
+        Environment.Exit(1);
+    Thread.Sleep(int.Parse(args[1]));
     return;
 }
 if (args.FirstOrDefault() == "--interrupt")
@@ -123,7 +132,8 @@ try
         };
         var hash = withHash ? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(package)) : null;
         var vm = new MainWindowViewModel(Manifest("1", hash), settings, new UserAccount("test", "测试", null, 0));
-        var product = vm.Products.Single();
+        // 前面场景留下的安装记录会作为“已下架”出现在软件库里
+        var product = vm.Products.Single(p => p.Id == id);
         ProductViewModel? blocker = null;
         if (mode == "queued")
         {
@@ -341,13 +351,261 @@ try
             Old(release, dir);
             var manifest = new UpdateManifest { Products = [new() { Id = release.Id, Name = "测试", Version = "2", DownloadUrl = "https://example.test/package.zip" }] };
             var vm = new MainWindowViewModel(manifest, new SettingsViewModel(), new UserAccount("test", "测试", null, 0));
-            var product = vm.Products.Single();
+            var product = vm.Products.Single(p => p.Id == release.Id);
             vm.Update(product);
             Check(!product.IsBusy && vm.Notices.Any(n => n.Text.Contains("正在运行")));
             vm.Repair(product);
             Check(!product.IsBusy && vm.Notices.Count == 2);
         }
         finally { if (!process.HasExited) process.Kill(entireProcessTree: true); process.WaitForExit(); }
+    });
+    Run("版本比较：正式版高于同号预发布版（#12）", () =>
+    {
+        Check(VersionUtil.Compare("3.1.0", "3.1.0-rc.1") > 0 && VersionUtil.Compare("3.1.0-rc.1", "3.1.0") < 0);
+        Check(VersionUtil.Compare("1.10.0", "1.9.2") > 0 && VersionUtil.Compare("2611", "2610") > 0);
+        Check(VersionUtil.Compare("1.0", "1.0.0") == 0 && VersionUtil.Compare("v1.2.0+abc", "1.2.0") == 0);
+        Check(VersionUtil.Compare("1.0.0-rc.2", "1.0.0-rc.10") < 0);
+        Check(VersionUtil.Compare("1.0.0-alpha", "1.0.0-alpha.1") < 0 && VersionUtil.Compare("1.0.0-1", "1.0.0-alpha") < 0);
+        Check(VersionUtil.Compare("3.2.0-rc.1", "3.1.0") > 0);
+        var id = "regression-prerelease";
+        var dir = Path.Combine(root, id);
+        Directory.CreateDirectory(dir);
+        LocalInstalls.Set(new InstallRecord { Id = id, Version = "3.1.0-rc.1", Path = dir, Files = [] });
+        var manifest = new UpdateManifest { Products = [new() { Id = id, Name = "测试", Version = "3.1.0", DownloadUrl = "https://example.test/x.zip" }] };
+        var vm = new MainWindowViewModel(manifest, new SettingsViewModel(), new UserAccount("test", "测试", null, 0));
+        Check(vm.Products.Single(p => p.Id == id) is { HasUpdate: true, State: ProductState.UpdateAvailable });
+        LocalInstalls.Remove(id);
+    });
+    Run("自定义代理：IPv6 地址加方括号，无效地址不悄悄改用系统代理（#32）", () =>
+    {
+        Check(CanApi.ProxyUri("::1", 8080)?.ToString() == "http://[::1]:8080/");
+        Check(CanApi.ProxyUri("[::1]", 8080)?.ToString() == "http://[::1]:8080/");
+        Check(CanApi.ProxyUri(" 127.0.0.1 ", 7890)?.ToString() == "http://127.0.0.1:7890/");
+        Check(CanApi.ProxyUri("http://proxy.local", 3128)?.ToString() == "http://proxy.local:3128/");
+        Check(CanApi.ProxyUri("bad host", 1) is null && CanApi.ProxyUri("", 1) is null && CanApi.ProxyUri("a/b", 1) is null);
+        var settings = new SettingsViewModel { ProxyMode = "自定义 HTTP 代理", ProxyHost = "bad host" };
+        CanApi.Shared.Configure(settings);
+        try
+        {
+            var error = Assert<ApiException>(() => CanApi.Shared.GetDownloadAsync(new Uri("http://127.0.0.1:1/x"), 0, CancellationToken.None).GetAwaiter().GetResult());
+            Check(error.Code == "proxy");
+        }
+        finally { CanApi.Shared.Configure(new SettingsViewModel { ProxyMode = "不使用代理" }); }
+    });
+    Run("zip 校验发现 CRC32 不符的存储条目（#8）", () =>
+    {
+        var path = Path.Combine(root, "stored.zip");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        using (var writer = new StreamWriter(zip.CreateEntry("app/a.txt", CompressionLevel.NoCompression).Open()))
+            writer.Write("PAYLOAD_PAYLOAD_PAYLOAD");
+        PackageInstaller.Verify(path);
+        var bytes = File.ReadAllBytes(path);
+        var at = bytes.AsSpan().IndexOf("PAYLOAD"u8);
+        bytes[at] = (byte)'X';
+        File.WriteAllBytes(path, bytes);
+        Assert<InvalidDataException>(() => PackageInstaller.Verify(path));
+    });
+    Run("发布已更新（大小不符）时一个字节也不写入并要求重新获取发布信息（#9）", () =>
+    {
+        var body = new byte[1000];
+        using var server = Serve(async context =>
+        {
+            context.Response.ContentLength64 = body.Length;
+            await context.Response.OutputStream.WriteAsync(body);
+            context.Response.Close();
+        }, out var address);
+        var target = Path.Combine(root, "rollover.zip");
+        // Task.Run：测试线程上有 Avalonia 的同步上下文，直接阻塞等待会死锁
+        Assert<ReleaseChangedException>(() => Task.Run(() => PackageInstaller.DownloadAsync(new Uri(address + "old.zip"), target, 900,
+            new DownloadProgress(), () => 0, CancellationToken.None)).GetAwaiter().GetResult());
+        Check(!File.Exists(target) && !File.Exists(PackageInstaller.PartialPath(target)));
+    });
+    Run("续传时服务器文件已变化则从头下载，不拼接两个版本（#9）", () =>
+    {
+        var body = Enumerable.Range(0, 1000).Select(i => (byte)i).ToArray();
+        string? ifRange = null;
+        using var server = Serve(async context =>
+        {
+            // 文件标识对不上：按 If-Range 的规定返回完整内容
+            ifRange = context.Request.Headers["If-Range"];
+            context.Response.Headers["ETag"] = "\"new\"";
+            context.Response.ContentLength64 = body.Length;
+            await context.Response.OutputStream.WriteAsync(body);
+            context.Response.Close();
+        }, out var address);
+        var target = Path.Combine(root, "resume.zip");
+        File.WriteAllBytes(PackageInstaller.PartialPath(target), new byte[400]);
+        File.WriteAllText(PackageInstaller.PartialPath(target) + ".id", "etag \"old\"");
+        Task.Run(() => PackageInstaller.DownloadAsync(new Uri(address + "x.zip"), target, body.Length, new DownloadProgress(), () => 0, CancellationToken.None))
+            .GetAwaiter().GetResult();
+        Check(ifRange == "\"old\"");
+        Check(File.ReadAllBytes(target).AsSpan().SequenceEqual(body));
+        Check(!File.Exists(PackageInstaller.PartialPath(target)) && !File.Exists(PackageInstaller.PartialPath(target) + ".id"));
+    });
+    Run("数据目录内的安装位置存为相对路径（#7）", () =>
+    {
+        var id = "regression-portable";
+        var dir = Path.Combine(AppPaths.Apps, id);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            LocalInstalls.Set(new InstallRecord { Id = id, Version = "1", Path = dir, Files = [] });
+            var stored = LocalData.Load<List<InstallRecord>>("installs.json")!.Single(r => r.Id == id);
+            Check(!Path.IsPathRooted(stored.Path) && AppPaths.Resolve(stored.Path) == dir);
+            Check(LocalInstalls.Find(id)?.Path == dir);
+            var outside = LocalData.Load<List<InstallRecord>>("installs.json")!.First(r => r.Id.StartsWith("regression-") && r.Id != id);
+            Check(Path.IsPathRooted(outside.Path));
+        }
+        finally
+        {
+            LocalInstalls.Remove(id);
+            Directory.Delete(dir);
+        }
+    });
+    Run("重启后已下架的已安装软件仍在软件库中（#10）", () =>
+    {
+        var id = "regression-delisted";
+        var dir = Path.Combine(root, id);
+        Directory.CreateDirectory(dir);
+        LocalInstalls.Set(new InstallRecord { Id = id, Version = "1.0.0", Path = dir, Files = [] });
+        var vm = new MainWindowViewModel(new UpdateManifest(), new SettingsViewModel(), new UserAccount("test", "测试", null, 0));
+        var product = vm.Products.Single(p => p.Id == id);
+        Check(product is { IsDelisted: true, IsInstalled: true, State: ProductState.Installed, CanDownload: false, HasMenu: true });
+        Check(product.InstallPath == dir && product.InstalledVersion == "1.0.0");
+        LocalInstalls.Remove(id);
+    });
+    Run("启动时已有新版本也会自动更新（#11）", () =>
+    {
+        var id = "regression-autoupdate";
+        var dir = Path.Combine(root, id);
+        Directory.CreateDirectory(dir);
+        LocalInstalls.Set(new InstallRecord { Id = id, Version = "1.0.0", Path = dir, Files = [] });
+        var settings = new SettingsViewModel { AutoUpdateInstalled = true, CacheFolder = Path.Combine(root, "cache"), ProxyMode = "不使用代理" };
+        var manifest = new UpdateManifest { Products = [new() { Id = id, Name = "测试", Version = "2.0.0", DownloadUrl = "http://127.0.0.1:1/x.zip" }] };
+        var vm = new MainWindowViewModel(manifest, settings, new UserAccount("test", "测试", null, 0));
+        var product = vm.Products.Single(p => p.Id == id);
+        Check(product.IsBusy && product.CurrentTask == ProductTask.Update);
+        Check(vm.Notices.Any(n => n.Text.StartsWith("已开始自动更新")));
+        Wait(() => !product.IsBusy);
+        LocalInstalls.Remove(id);
+    });
+    Run("离开主界面后旧界面不再在后台安装（#13）", () =>
+    {
+        var package = File.ReadAllBytes(Package(("a.txt", "NEW")));
+        var received = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        using var server = Serve(async context =>
+        {
+            context.Response.ContentLength64 = package.Length;
+            await context.Response.OutputStream.WriteAsync(package.AsMemory(0, 1));
+            await context.Response.OutputStream.FlushAsync();
+            received.TrySetResult();
+            await release.Task;
+            try
+            {
+                await context.Response.OutputStream.WriteAsync(package.AsMemory(1));
+                context.Response.Close();
+            }
+            catch (Exception ex) when (ex is HttpListenerException or IOException or ObjectDisposedException) { /* 客户端已取消 */ }
+        }, out var address);
+        var id = "regression-stop";
+        var settings = new SettingsViewModel { InstallRoot = root, CacheFolder = Path.Combine(root, "cache"), ProxyMode = "不使用代理" };
+        var manifest = new UpdateManifest
+        {
+            Products = [new() { Id = id, Name = "测试", Version = "1", DownloadUrl = address + "x.zip",
+                Components = [new() { Id = "main", Required = true, Size = package.Length }] }]
+        };
+        var vm = new MainWindowViewModel(manifest, settings, new UserAccount("test", "测试", null, 0));
+        var product = vm.Products.Single(p => p.Id == id);
+        vm.Install(product, product.Components.ToList(), Path.Combine(root, id), false);
+        Wait(() => received.Task.IsCompleted);
+        var stop = vm.StopAsync();
+        release.SetResult();
+        Wait(() => stop.IsCompleted);
+        Thread.Sleep(200);
+        Dispatcher.UIThread.RunJobs();
+        Check(LocalInstalls.Find(id) is null && !File.Exists(Path.Combine(root, id, "a.txt")));
+    });
+    Run("设置保存失败时保持未保存并报错（#31）", () =>
+    {
+        var path = Path.Combine(LocalData.Root, "settings.json");
+        var aside = path + ".regression";
+        if (File.Exists(path)) File.Move(path, aside, true);
+        Directory.CreateDirectory(path);
+        try
+        {
+            var settings = new SettingsViewModel();
+            settings.MarkSaved();
+            settings.MaxConcurrentDownloads = 4;
+            Check(settings.IsDirty);
+            Assert<IOException>(settings.Save, allowDerived: true, alsoAllow: typeof(UnauthorizedAccessException));
+            Check(settings.IsDirty);
+            Check(!Directory.EnumerateFiles(LocalData.Root, "settings.json.*.tmp").Any());
+        }
+        finally
+        {
+            Directory.Delete(path);
+            if (File.Exists(aside)) File.Move(aside, path);
+        }
+    });
+    Run("自更新先完整写出新版本再替换，失败时原程序不变（#4）", () =>
+    {
+        var replace = typeof(SelfUpdater).GetMethod("ReplaceFile", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var dir = Path.Combine(root, "self-update");
+        Directory.CreateDirectory(dir);
+        var target = Path.Combine(dir, "Downloader.exe");
+        var source = target + ".new";
+        File.WriteAllText(target, "OLD");
+        File.WriteAllText(source, "NEW");
+        replace.Invoke(null, [source, target]);
+        Check(File.ReadAllText(target) == "NEW" && File.ReadAllText(target + ".old") == "OLD" && !File.Exists(target + ".tmp"));
+        File.Delete(target + ".old");
+        // 复制失败（新版本不存在）：原程序不动
+        File.Delete(source);
+        try { replace.Invoke(null, [source, target]); throw new Exception("应当失败"); }
+        catch (TargetInvocationException ex) when (ex.InnerException is IOException) { }
+        Check(File.ReadAllText(target) == "NEW" && !File.Exists(target + ".tmp"));
+    });
+    Run("同一数据目录只运行一个下载器（#6）", () =>
+    {
+        var first = StartChild("--instance", "4000");
+        try
+        {
+            Thread.Sleep(1500);
+            Check(!first.HasExited);
+            Check(Child("--instance", "0") == 1);
+            Check(first.WaitForExit(15000) && first.ExitCode == 0);
+            // 第一个进程退出后锁自动释放
+            Check(Child("--instance", "0") == 0);
+        }
+        finally { if (!first.HasExited) first.Kill(true); first.Dispose(); }
+    });
+    Run("对话框打开时键盘只作用于对话框，Esc 关闭并还原焦点（#29）", () =>
+    {
+        var vm = new MainWindowViewModel(new UpdateManifest(), new SettingsViewModel(), new UserAccount("test", "测试", null, 0));
+        var window = new Downloader.Views.MainWindow { DataContext = vm };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var search = window.GetVisualDescendants().OfType<Avalonia.Controls.TextBox>().First();
+        search.Focus();
+        Dispatcher.UIThread.RunJobs();
+        Check(window.FocusManager?.GetFocusedElement() == search);
+        var dialog = new Downloader.Views.DialogView("测试", new Avalonia.Controls.TextBlock { Text = "内容" }, "确定");
+        var result = window.ShowDialogAsync(dialog);
+        Dispatcher.UIThread.RunJobs();
+        Check(window.FocusManager?.GetFocusedElement() is Avalonia.Visual focused && dialog.IsVisualAncestorOf(focused));
+        window.KeyTextInput("pilot");
+        Dispatcher.UIThread.RunJobs();
+        Check(vm.SearchText == "");
+        window.KeyPressQwerty(Avalonia.Input.PhysicalKey.Escape, Avalonia.Input.RawInputModifiers.None);
+        Wait(() => result.IsCompleted);
+        Check(result.Result == Downloader.Views.DialogResult.None);
+        Dispatcher.UIThread.RunJobs();
+        Check(window.FocusManager?.GetFocusedElement() == search);
+        window.KeyTextInput("pilot");
+        Dispatcher.UIThread.RunJobs();
+        Check(vm.SearchText == "pilot");
+        window.Close();
     });
     Console.WriteLine($"PASS: {count} regression scenarios");
 }
@@ -359,12 +617,16 @@ finally
 }
 
 void Run(string name, Action action) { action(); count++; Console.WriteLine("PASS " + name); }
-int Child(params string[] arguments)
+Process StartChild(params string[] arguments)
 {
     var info = new ProcessStartInfo("dotnet") { UseShellExecute = false };
     info.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
     foreach (var argument in arguments) info.ArgumentList.Add(argument);
-    using var child = Process.Start(info)!;
+    return Process.Start(info)!;
+}
+int Child(params string[] arguments)
+{
+    using var child = StartChild(arguments);
     if (!child.WaitForExit(15000)) { child.Kill(true); throw new TimeoutException("恢复子进程超时"); }
     return child.ExitCode;
 }
@@ -379,6 +641,38 @@ void Wait(Func<bool> condition)
     }
 }
 void Check(bool condition) { if (!condition) throw new Exception("Assertion failed"); }
+T Assert<T>(Action action, bool allowDerived = false, Type? alsoAllow = null) where T : Exception
+{
+    try { action(); }
+    catch (Exception ex) when (ex.GetType() == typeof(T) || allowDerived && ex is T || alsoAllow?.IsInstanceOfType(ex) == true)
+    {
+        return ex as T ?? null!;
+    }
+    throw new Exception($"Expected {typeof(T).Name}");
+}
+// 本机 HTTP 服务：每个请求交给 handler 处理
+HttpListener Serve(Func<HttpListenerContext, Task> handler, out string address)
+{
+    using var portProbe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+    portProbe.Start();
+    var port = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+    portProbe.Stop();
+    var listener = new HttpListener();
+    address = $"http://127.0.0.1:{port}/";
+    listener.Prefixes.Add(address);
+    listener.Start();
+    _ = Task.Run(async () =>
+    {
+        while (listener.IsListening)
+        {
+            HttpListenerContext context;
+            try { context = await listener.GetContextAsync(); }
+            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or InvalidOperationException) { return; }
+            _ = Task.Run(() => handler(context));
+        }
+    });
+    return listener;
+}
 void Throws(Action action)
 {
     try { action(); }

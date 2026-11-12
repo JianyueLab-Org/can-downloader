@@ -26,6 +26,12 @@ public partial class ProductView : UserControl
             Host?.Cancel(product);
     }
 
+    private void OnLaunchClick(object? sender, RoutedEventArgs e)
+    {
+        if (Product is { } product)
+            Host?.Launch(product);
+    }
+
     private void OnRepairClick(object? sender, RoutedEventArgs e)
     {
         if (Product is { } product)

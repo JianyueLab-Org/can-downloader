@@ -59,4 +59,16 @@ public partial class DialogView : UserControl
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Complete(DialogResult.None);
 
     private void Complete(DialogResult result) => _result.TrySetResult(result);
+
+    /// <summary>关闭对话框，相当于点“取消”（Esc）。</summary>
+    public void Dismiss() => Complete(DialogResult.None);
+
+    /// <summary>把焦点放到对话框里：主按钮可用时是主按钮，否则是关闭按钮。</summary>
+    public void FocusInitial()
+    {
+        if (PrimaryButton is { IsVisible: true, IsEffectivelyEnabled: true })
+            PrimaryButton.Focus(NavigationMethod.Tab);
+        else
+            CloseButton.Focus(NavigationMethod.Tab);
+    }
 }

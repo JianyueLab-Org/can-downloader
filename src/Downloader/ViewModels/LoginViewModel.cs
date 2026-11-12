@@ -88,7 +88,7 @@ public sealed partial class LoginViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
-    [NotifyCanExecuteChangedFor(nameof(LoginCommand))]
+    [NotifyCanExecuteChangedFor(nameof(LoginCommand), nameof(UpdateLauncherCommand))]
     private bool _isBusy;
 
     public bool IsIdle => !IsBusy;
@@ -153,7 +153,8 @@ public sealed partial class LoginViewModel : ViewModelBase
         _signIn?.Cancel();
     }
 
-    [RelayCommand]
+    /// <summary>等待浏览器授权时不可用（先取消登录），不会一边登录一边更新。</summary>
+    [RelayCommand(CanExecute = nameof(IsIdle))]
     private void UpdateLauncher() => UpdateLauncherRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
