@@ -17,7 +17,7 @@
       "color": "#3DBE84",
       "summary": "管制员语音客户端",
       "description": "管制员语音客户端。一栈频率，每个频率带 RX / TX / XC。管制席位必需，需配合 EuroScope 使用。",
-      "executable": "audio-for-can.exe"
+      "executable": "ControllerClient.exe"
     },
     {
       "id": "atis-for-can",

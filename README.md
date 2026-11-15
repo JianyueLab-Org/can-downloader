@@ -1,17 +1,17 @@
 # CAN 下载器
 
-基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client，Audio / ATIS / MSFS / XPC for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，同一套代码发布 Windows、macOS（仅 Apple Silicon ARM64）、Linux（通用 tar.gz）三个平台，软件库只列出有本机平台安装包的软件（目前 Audio / ATIS / MSFS / XPC for CAN 只有 Windows 版，CAN Pilot Client 三个平台都有）。
+基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client、C# Audio for CAN、C# ATIS for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，同一套代码发布 Windows、macOS（仅 Apple Silicon ARM64）、Linux（通用 tar.gz）三个平台，软件库只列出有本机平台安装包的软件。
 
 已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载、下载器自更新。下表的接口都直接请求 `https://api.ceruleanavi.net`，不经过 `https://ceruleanavi.net/api/...` 的兼容转发（该转发 2027-01-01 起不再保证可用）；网站上只用到 OAuth 授权页（在浏览器中打开）。
 
 | 功能 | API |
 |---|---|
 | 登录（OAuth 2.1 授权码 + PKCE，公开客户端，在 [platform.ceruleanavi.net](https://platform.ceruleanavi.net/) 注册） | 发现文档 `/.well-known/openid-configuration`；授权页 `https://ceruleanavi.net/oauth/authorize`（由发现文档给出）；`/api/oauth/token`、`/api/oauth/userinfo`、`/api/oauth/revoke` |
-| 软件列表与版本 | `GET /api/v1/clients/latest`：`clients` 是 can-audio 的客户端合集；`apps` 是独立发布的程序（`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明 |
+| 软件列表与版本 | `GET /api/v1/clients/latest`：`apps` 是独立发布的程序（`audio-for-can`、`atis-for-can`、`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明；`clients` 保留给旧消费者，同名条目以 `apps` 为准，只显示一次 |
 | 下载器自更新 | `apps.can-downloader`（下载地址同下） |
 | 各平台安装包 | `clients.<名称>.platforms` / `apps.<名称>.platforms`（可选）：以平台标识为键（`win-x64`、`osx-arm64`、`osx-universal`、`linux-x64`、`linux-arm64`），值为 `{download, origin, size, sha256}`。没有时顶层地址是 Windows 版，见下面“平台” |
 | 下载（下载源“本站”） | `GET /api/v1/clients/download/{client}`，支持 Range 续传 |
-| 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址；私有仓库（CAN Pilot Client、下载器）没有公开地址，始终走本站 |
+| 下载（下载源“GitHub”） | 发布信息里的 GitHub Releases 原始地址；没有原始地址时使用本站中转 |
 
 ## 流程
 
@@ -33,6 +33,7 @@
 
 - `categories`：软件库分类（顺序即显示顺序）
 - `products`：按 API 的客户端名称（如 `audio-for-can`）提供名称、分类、图标字母与颜色、简介、可执行文件
+- `audio-for-can` 安装 C# 管制语音客户端，运行 `ControllerClient.exe`；`atis-for-can` 运行 `atis-for-can.exe`。两者版本独立，当前包只提供 Windows x64。
 
 API 里有、catalog.json 里没有的客户端也会出现，归入“其他”。
 
@@ -42,7 +43,7 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 |---|---|---|
 | Windows x64 | `CAN-Downloader-<版本>-win-x64.zip` | 只含 `Downloader.exe`，便携 |
 | macOS 12+（ARM64） | `CAN-Downloader-<版本>-osx-arm64.zip` | `CAN Downloader.app`，仅支持 Apple Silicon，包内直接使用 ARM64 单文件程序。ad-hoc 签名、没有公证：用浏览器下载的话第一次打开前执行 `xattr -dr com.apple.quarantine "/Applications/CAN Downloader.app"` |
-| Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/share/can-downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
+| Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/bin/CAN/downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
 
 下载器按本机平台挑安装包（`ViewModels/Manifest.cs`）：API 给出 `platforms` 时按优先顺序挑（macOS 优先 `osx-arm64`，兼容客户端的 `osx-universal` 通用包）；没有 `platforms` 时顶层地址是 Windows 版，macOS / Linux 按文件名约定把 GitHub 原始地址里的 `-win-x64.zip` 换成 `-osx-arm64.zip` / `-linux-x64.tar.gz`，只能从 GitHub 下载，SHA-256 从同一发布的 `SHA256SUMS` 查。都没有的软件不出现在软件库里。
 
@@ -162,7 +163,7 @@ packaging/
 - [x] 自更新、按清单生成软件库、下载队列的界面
 - [x] CAN 账号 OAuth 登录、自动登录（需要在 platform.ceruleanavi.net 注册下载器，把 client_id 填入 `Services/OAuthLogin.cs`）
 - [x] 从 API 获取软件列表；真实下载（续传、限速、并发、本站 / GitHub 下载源）、校验与安装
-- [x] 下载器自身的更新、CAN Pilot Client（需要 can-api 的 `apps` 部署上线，并配置能读取私有仓库的 `GITHUB_TOKEN`）
+- [x] 下载器自身的更新、CAN Pilot Client（从 can-api 的 `apps` 获取发布信息）
 - [ ] can-voice 新一代客户端（`/api/v1/voice/*`，目前还没有发布可安装的构建）
 - [x] 设置保存、便携目录、按日期分文件的日志、单文件发布
 - [x] macOS（ARM64 .app）与 Linux（通用 tar.gz）版本；API 加上 `platforms` 后改为按平台的本站中转下载

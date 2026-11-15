@@ -40,19 +40,50 @@ public sealed class CanApi
             "自定义 HTTP 代理" => ProxyMode.Custom,
             _ => ProxyMode.System
         };
-        var proxy = mode == ProxyMode.Custom ? $"http://{settings.ProxyHost.Trim()}:{(int)settings.ProxyPort}" : null;
+        var proxy = mode == ProxyMode.Custom ? ProxyUri(settings.ProxyHost, (int)settings.ProxyPort) : null;
         var timeout = TimeSpan.FromSeconds(Math.Clamp((double)settings.TimeoutSeconds, 5, 120));
-        var key = $"{mode}|{proxy}|{timeout}";
+        var key = $"{mode}|{settings.ProxyHost.Trim()}|{proxy}|{timeout}";
         if (key == _configKey)
             return;
         _configKey = key;
+        // 自定义代理地址无效时不能悄悄改用系统代理或直连：之后的请求都报错，提示检查设置
+        _configError = mode == ProxyMode.Custom && proxy is null
+            ? $"自定义代理地址“{settings.ProxyHost.Trim()}”无效，请在设置的“网络”中修改。"
+            : null;
         (_http, _downloads) = CreateClients(mode, proxy, timeout);
-        Log.Info($"网络设置：代理 {mode}{(proxy is null ? "" : " " + proxy)}，超时 {timeout.TotalSeconds} 秒");
+        if (_configError is not null)
+            Log.Warn($"网络设置：{_configError}");
+        else
+            Log.Info($"网络设置：代理 {mode}{(proxy is null ? "" : " " + proxy)}，超时 {timeout.TotalSeconds} 秒");
     }
+
+    /// <summary>
+    /// 由设置里分开填写的地址和端口组成代理地址。地址可以是主机名、IPv4、IPv6（带不带方括号都行），
+    /// 也可以带 http:// 前缀；无效时返回 null。
+    /// </summary>
+    public static Uri? ProxyUri(string host, int port)
+    {
+        host = host.Trim();
+        if (host.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            host = host[7..];
+        host = host.TrimEnd('/');
+        if (host.Length == 0 || port is < 1 or > 65535)
+            return null;
+        // 不带方括号的 IPv6（::1、fe80::1）要加上方括号才能放进地址
+        if (!host.StartsWith('[') && System.Net.IPAddress.TryParse(host, out var ip)
+            && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+            host = $"[{ip}]";
+        return Uri.TryCreate($"http://{host}:{port}/", UriKind.Absolute, out var uri)
+               && uri.Port == port && uri.AbsolutePath == "/" && string.IsNullOrEmpty(uri.UserInfo)
+            ? uri
+            : null;
+    }
+
+    private string? _configError;
 
     private enum ProxyMode { None, System, Custom }
 
-    private (HttpClient Api, HttpClient Downloads) CreateClients(ProxyMode mode, string? proxy, TimeSpan timeout)
+    private (HttpClient Api, HttpClient Downloads) CreateClients(ProxyMode mode, Uri? proxy, TimeSpan timeout)
     {
         SocketsHttpHandler Handler(bool decompress)
         {
@@ -68,8 +99,12 @@ public sealed class CanApi
                 case ProxyMode.None:
                     handler.UseProxy = false;
                     break;
-                case ProxyMode.Custom when Uri.TryCreate(proxy, UriKind.Absolute, out var uri):
-                    handler.Proxy = new WebProxy(uri);
+                case ProxyMode.Custom when proxy is not null:
+                    handler.Proxy = new WebProxy(proxy);
+                    break;
+                case ProxyMode.Custom:
+                    // 地址无效：请求在 Send 里直接报错，这里也不使用系统代理
+                    handler.UseProxy = false;
                     break;
             }
             return handler;
@@ -90,11 +125,18 @@ public sealed class CanApi
         SendAsync<ClientsLatest>(new HttpRequestMessage(HttpMethod.Get, "api/v1/clients/latest"), ct);
 
     /// <summary>下载请求，<paramref name="offset"/> 大于 0 时用 Range 续传。只读取响应头，调用方负责读取内容并释放响应。</summary>
-    public async Task<HttpResponseMessage> GetDownloadAsync(Uri url, long offset, CancellationToken ct)
+    public Task<HttpResponseMessage> GetDownloadAsync(Uri url, long offset, CancellationToken ct) =>
+        GetDownloadAsync(url, offset, null, ct);
+
+    /// <summary>续传时 <paramref name="ifRange"/> 是已下载部分对应的服务器文件标识：文件变了的话服务器返回完整内容（200）而不是后半段。</summary>
+    public async Task<HttpResponseMessage> GetDownloadAsync(Uri url, long offset, RangeConditionHeaderValue? ifRange, CancellationToken ct)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         if (offset > 0)
+        {
             request.Headers.Range = new RangeHeaderValue(offset, null);
+            request.Headers.IfRange = ifRange;
+        }
 
         var response = await Send(_downloads, request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
@@ -128,10 +170,12 @@ public sealed class CanApi
     }
 
     /// <summary>发送请求，把网络错误与超时转换成 <see cref="ApiException"/>。每个请求记一行日志（不含请求内容）。</summary>
-    private static async Task<HttpResponseMessage> Send(HttpClient client, HttpRequestMessage request, HttpCompletionOption option, CancellationToken ct)
+    private async Task<HttpResponseMessage> Send(HttpClient client, HttpRequestMessage request, HttpCompletionOption option, CancellationToken ct)
     {
         using (request)
         {
+            if (_configError is { } configError)
+                throw new ApiException("proxy", configError);
             var target = request.RequestUri is { IsAbsoluteUri: true } uri ? uri.ToString() : $"{BaseUri}{request.RequestUri}";
             var range = request.Headers.Range is { } r ? $" Range {r}" : "";
             var started = System.Diagnostics.Stopwatch.StartNew();

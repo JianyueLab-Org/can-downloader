@@ -16,9 +16,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private const double TickSeconds = 0.25;
 
     private readonly DispatcherTimer _timer;
+    /// <summary>按设置里的“自动检查更新”间隔定时检查（每分钟看一次是否到时间，改了设置马上生效）。</summary>
+    private readonly DispatcherTimer _checkTimer;
     private readonly Dictionary<ProductViewModel, Transfer> _transfers = [];
+    /// <summary>不属于下载任务的后台操作（卸载），停止时也要等它们结束。</summary>
+    private readonly HashSet<Task> _work = [];
     private UpdateManifest? _manifest;
     private LibraryEntry? _selectedEntry;
+    private DateTime _lastCheck = DateTime.UtcNow;
+    /// <summary>已停止（离开主界面）：不再开始新的下载、安装或检查。</summary>
+    private bool _stopped;
 
     /// <param name="manifest">软件清单；为 null（获取失败）时软件库为空，可点“检查更新”重试。</param>
     /// <param name="account">已登录的账号。</param>
@@ -27,12 +34,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Settings = settings;
         Account = account;
         _timer = new DispatcherTimer(TimeSpan.FromSeconds(TickSeconds), DispatcherPriority.Background, (_, _) => Tick());
+        _checkTimer = new DispatcherTimer(TimeSpan.FromMinutes(1), DispatcherPriority.Background, (_, _) => CheckOnSchedule());
 
         if (manifest is not null)
             ApplyManifest(manifest, announce: false);
 
         SelectedEntry = Products.FirstOrDefault(p => p.HasUpdate) ?? Products.FirstOrDefault();
         LastCheckText = manifest is null ? "" : $"已检查 {DateTime.Now:HH:mm}";
+        _checkTimer.Start();
+    }
+
+    /// <summary>
+    /// 离开主界面（退出登录、更新并重启）前调用：停止定时检查，取消下载（已下载的部分保留），
+    /// 等正在进行的安装、卸载结束。之后这个界面不再开始任何下载或安装，不会在后台与新的界面同时安装。
+    /// </summary>
+    public async Task StopAsync()
+    {
+        if (_stopped)
+            return;
+        _stopped = true;
+        _checkTimer.Stop();
+        var running = new List<Task>(_work);
+        foreach (var transfer in _transfers.Values)
+        {
+            transfer.Cts?.Cancel();
+            if (transfer.Run is not null)
+                running.Add(transfer.Run);
+        }
+        try { await Task.WhenAll(running); }
+        catch { /* 结果已由各自的任务处理 */ }
+        _timer.Stop();
+        Log.Info("主界面已停止");
     }
 
     public SettingsViewModel Settings { get; }
@@ -49,9 +81,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// <summary>退出登录：停止下载（已下载的部分保留，下次可续传），吊销 OAuth 授权，回到登录窗口。</summary>
     public async Task LogoutAsync()
     {
-        _timer.Stop();
-        foreach (var transfer in _transfers.Values)
-            transfer.Cts?.Cancel();
+        await StopAsync();
         await OAuthLogin.SignOutAsync();
         var account = AccountStore.Load();
         AccountStore.SaveRefreshToken(account, null);
@@ -74,6 +104,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>需要主窗口显示的提示（例如找不到要打开的程序）。</summary>
     public event EventHandler<(string Title, string Message)>? MessageRequested;
+
+    /// <summary>下载与安装完成或失败。设置了“完成时通知”且窗口不在前台时由主窗口发系统通知。</summary>
+    public event EventHandler<(string Title, string Message)>? TaskFinished;
 
     [ObservableProperty] private string _searchText = "";
 
@@ -176,9 +209,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             if (product.IsInstalled || product.IsBusy)
             {
                 product.IsDelisted = true;
-                product.RefreshState();
+                if (!product.IsBusy)
+                    product.RefreshState();
                 result.Add(product);
             }
+        }
+
+        // 本机装着、清单里却没有的软件（例如重启下载器前已下架）：按安装记录补上，仍可打开、打开目录、卸载
+        var listed = result.Select(p => p.Id).ToHashSet();
+        foreach (var record in LocalInstalls.All())
+        {
+            if (listed.Contains(record.Id) || record.Id == ManifestSource.LauncherAppId)
+                continue;
+            var item = ManifestSource.Delisted(record.Id, record.Version);
+            var product = new ProductViewModel(record.Id) { InstalledVersion = record.Version, InstallPath = record.Path };
+            product.Apply(item, categoryNames.GetValueOrDefault(item.Category, "其他"), productNames);
+            product.IsDelisted = true;
+            product.RefreshState();
+            result.Add(product);
         }
 
         Products.Clear();
@@ -186,6 +234,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Products.Add(product);
         RebuildEntries();
         RefreshSummary();
+
+        // 自动更新：所有可更新的已安装软件，包括启动时就已经有新版本的
+        var autoUpdated = new List<ProductViewModel>();
+        if (Settings.AutoUpdateInstalled && !_stopped)
+        {
+            foreach (var product in Products.Where(p => p.State == ProductState.UpdateAvailable && p.CanDownload).ToList())
+            {
+                Enqueue(product, ProductTask.Update);
+                if (product.IsBusy)
+                    autoUpdated.Add(product);
+            }
+            if (autoUpdated.Count > 0)
+                Notices.Add(new NoticeViewModel(NoticeKind.Info,
+                    $"已开始自动更新：{string.Join("、", autoUpdated.Select(p => $"{p.Name} {p.LatestVersion}"))}"));
+        }
 
         if (!announce)
             return;
@@ -204,21 +267,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 "查看", () => SelectedEntry = added[0]));
         }
 
+        // 自动更新没能开始的（例如软件正在运行）仍然提示
+        updated.RemoveAll(autoUpdated.Contains);
         if (updated.Count > 0)
         {
-            if (Settings.AutoUpdateInstalled)
-            {
-                foreach (var product in updated)
-                    Enqueue(product, ProductTask.Update);
-                Notices.Add(new NoticeViewModel(NoticeKind.Info,
-                    $"已开始自动更新：{string.Join("、", updated.Select(p => $"{p.Name} {p.LatestVersion}"))}"));
-            }
-            else
-            {
-                Notices.Add(new NoticeViewModel(NoticeKind.Update,
-                    $"{updated.Count} 个已安装的软件有新版本：{string.Join("、", updated.Select(p => $"{p.Name} {p.LatestVersion}"))}",
-                    "全部更新", UpdateAll));
-            }
+            Notices.Add(new NoticeViewModel(NoticeKind.Update,
+                $"{updated.Count} 个已安装的软件有新版本：{string.Join("、", updated.Select(p => $"{p.Name} {p.LatestVersion}"))}",
+                "全部更新", UpdateAll));
         }
     }
 
@@ -254,10 +309,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private async Task CheckUpdatesAsync()
     {
         IsChecking = true;
+        _lastCheck = DateTime.UtcNow;
         try
         {
             CanApi.Shared.Configure(Settings);
             var manifest = await ManifestSource.FetchAsync();
+            if (_stopped)
+                return;
 
             // 清除上一次检查留下的提示与“新”标记
             Notices.Clear();
@@ -269,7 +327,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         catch (ApiException ex)
         {
-            Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"检查更新失败：{ex.Message}", "重试", () => _ = CheckUpdatesAsync()));
+            // 定时检查连续失败时只保留最新的一条
+            foreach (var old in Notices.Where(n => n.Text.StartsWith(CheckFailedPrefix, StringComparison.Ordinal)).ToList())
+                Notices.Remove(old);
+            Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"{CheckFailedPrefix}{ex.Message}", "重试", () => _ = CheckUpdatesAsync()));
         }
         finally
         {
@@ -277,7 +338,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private const string CheckFailedPrefix = "检查更新失败：";
+
     private bool CanCheckUpdates() => !IsChecking;
+
+    /// <summary>到了设置的检查间隔就检查一次；“仅启动时”不定时检查。</summary>
+    private void CheckOnSchedule()
+    {
+        if (_stopped || IsChecking || Settings.CheckIntervalTime is not { } interval)
+            return;
+        if (DateTime.UtcNow - _lastCheck >= interval)
+        {
+            Log.Info($"定时检查更新（{Settings.CheckInterval}）");
+            _ = CheckUpdatesAsync();
+        }
+    }
 
     [RelayCommand]
     private void DismissNotice(NoticeViewModel notice) => Notices.Remove(notice);
@@ -351,7 +426,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void Enqueue(ProductViewModel product, ProductTask task)
     {
-        if (product.IsBusy || !product.CanDownload)
+        if (_stopped || product.IsBusy || !product.CanDownload)
             return;
 
         ReleaseSnapshot release;
@@ -387,6 +462,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// <summary>按设置的同时下载数启动排队中的项目。</summary>
     private void Pump()
     {
+        if (_stopped)
+        {
+            RefreshSummary();
+            return;
+        }
         CanApi.Shared.Configure(Settings);
         var active = Products.Count(p => p.State == ProductState.Downloading);
         var maxConcurrent = Math.Max(1, (int)Settings.MaxConcurrentDownloads);
@@ -439,6 +519,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return;
         }
+        catch (ReleaseChangedException ex)
+        {
+            await RetryWithNewReleaseAsync(product, transfer, ex);
+            return;
+        }
         catch (Exception ex)
         {
             Fail(product, transfer, "下载失败", ex);
@@ -453,6 +538,38 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         product.State = ProductState.Installing;
         Pump();
         await InstallPackageAsync(product, transfer);
+    }
+
+    /// <summary>
+    /// 下载时发现服务器上已经是另一个发布（旧版本地址被重定向到新版本）：重新获取发布信息，
+    /// 有了新的版本或安装包就按新的发布重新开始，不再用旧的大小与校验值反复下载、反复失败。
+    /// </summary>
+    private async Task RetryWithNewReleaseAsync(ProductViewModel product, Transfer transfer, ReleaseChangedException ex)
+    {
+        Log.Warn($"{product.Id} {transfer.Release.Version} 的安装包已变化，重新获取发布信息：{ex.Message}");
+        _transfers.Remove(product);
+        product.RefreshState();
+        RefreshSummary();
+        Pump();
+
+        while (IsChecking)
+            await Task.Delay(200);
+        if (!_stopped)
+            await CheckUpdatesAsync();
+        if (_stopped || product.IsBusy)
+            return;   // 已停止，或检查后已自动开始更新
+
+        var changed = product.CanDownload && (product.LatestVersion != transfer.Release.Version || product.DownloadSize != transfer.Release.Size);
+        if (changed)
+        {
+            Log.Info($"{product.Id} 按新的发布 {product.LatestVersion} 重新下载");
+            Enqueue(product, transfer.Task);
+            return;
+        }
+        var task = transfer.Task;
+        Notices.Add(new NoticeViewModel(NoticeKind.Warning,
+            $"{product.Name} 下载失败：服务器上的安装包与发布信息不一致，请稍后重试。", "重试", () => Enqueue(product, task)));
+        TaskFinished?.Invoke(this, ($"{product.Name} 下载失败", "服务器上的安装包与发布信息不一致，请稍后重试。"));
     }
 
     private volatile int _activeDownloads;
@@ -526,6 +643,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _transfers.Remove(product);
         product.RefreshState();
         RefreshSummary();
+        var done = transfer.Task switch
+        {
+            ProductTask.Repair => "已修复",
+            ProductTask.Update => "已更新",
+            _ => "已安装"
+        };
+        TaskFinished?.Invoke(this, ($"{product.Name} {done}", $"{product.Name} {release.Version} {done}。"));
 
         if (Settings.LaunchAfterInstall && transfer.Task == ProductTask.Install && product.Executable is not null)
             Launch(product);
@@ -539,8 +663,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         product.RefreshState();
         RefreshSummary();
         var task = transfer.Task;
-        Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"{product.Name} {title}：{Describe(ex, product)}",
+        var reason = Describe(ex, product);
+        Notices.Add(new NoticeViewModel(NoticeKind.Warning, $"{product.Name} {title}：{reason}",
             "重试", () => Enqueue(product, task)));
+        TaskFinished?.Invoke(this, ($"{product.Name} {title}", reason));
     }
 
     private static string Describe(Exception ex, ProductViewModel product) => ex switch
@@ -595,18 +721,25 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         try { if (transfer.Run is not null) await transfer.Run; }
         catch { /* 已取消 */ }
-        TryDelete(PackageInstaller.PartialPath(transfer.ZipPath));
+        PackageInstaller.DeletePartial(transfer.ZipPath);
     }
 
     public async Task UninstallAsync(ProductViewModel product)
     {
+        if (_stopped || product.IsBusy)
+            return;
         var record = LocalInstalls.Find(product.Id);
         product.State = ProductState.Installing;
         product.PhaseText = "正在卸载…";
         try
         {
             if (record is not null)
-                await Task.Run(() => PackageInstaller.Uninstall(record));
+            {
+                var work = Task.Run(() => PackageInstaller.Uninstall(record));
+                _work.Add(work);
+                try { await work; }
+                finally { _work.Remove(work); }
+            }
             Log.Info($"已卸载 {product.Id}（{record?.Path}）");
             LocalInstalls.Remove(product.Id);
             product.InstalledVersion = null;

@@ -20,11 +20,16 @@
     <views:TitleBar DockPanel.Dock="Top" Title="设置" />
 
     <Border DockPanel.Dock="Bottom" Classes="footer">
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="{DynamicResource Space.Sm}">
-        <Button Content="确定" Classes="primary" MinWidth="72" Click="OnOkClick" />
-        <Button Content="应用" MinWidth="72" IsEnabled="{Binding IsDirty}" Click="OnApplyClick" />
-        <Button Content="取消" MinWidth="72" IsCancel="True" Click="OnCancelClick" />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="{DynamicResource Space.Md}">
+        <!-- 保存失败时显示原因，修改保持未保存 -->
+        <TextBlock x:Name="SaveErrorText" Classes="caption" Foreground="{DynamicResource Brush.State.Error}"
+                   VerticalAlignment="Center" TextWrapping="Wrap" MaxHeight="40" IsVisible="False" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="{DynamicResource Space.Sm}">
+          <Button Content="确定" Classes="primary" MinWidth="72" Click="OnOkClick" />
+          <Button Content="应用" MinWidth="72" IsEnabled="{Binding IsDirty}" Click="OnApplyClick" />
+          <Button Content="取消" MinWidth="72" IsCancel="True" Click="OnCancelClick" />
+        </StackPanel>
+      </Grid>
     </Border>
 
     <Grid ColumnDefinitions="130,*">

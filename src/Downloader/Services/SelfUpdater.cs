@@ -125,7 +125,7 @@ public static class SelfUpdater
                 if (Directory.Exists(self))
                     ReplaceBundle(self, target);
                 else
-                    File.Copy(self, target, overwrite: true);
+                    ReplaceFile(self, target);
                 copied = true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -143,33 +143,88 @@ public static class SelfUpdater
         return true;
     }
 
-    /// <summary>macOS：旧的 .app 先改名为 .old，复制新的过去；复制失败时还原。</summary>
+    /// <summary>
+    /// Windows / Linux：先把新版本完整复制到同目录的临时文件并写入磁盘，再一步替换原程序（原程序改名为 .old 保留）。
+    /// 复制中途失败（磁盘满等）时原程序完全没动过；替换失败时原程序仍在原位置，或从 .old 还原。
+    /// </summary>
+    private static void ReplaceFile(string source, string target)
+    {
+        var temp = target + ".tmp";
+        var backup = target + OldSuffix;
+        DeletePath(temp);
+        try
+        {
+            File.Copy(source, temp, overwrite: true);
+            using (var stream = new FileStream(temp, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                stream.Flush(flushToDisk: true);
+            if (File.Exists(target))
+            {
+                DeletePath(backup);
+                File.Replace(temp, target, backup, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temp, target);
+            }
+        }
+        catch
+        {
+            TryDelete(temp);
+            // Windows 的 ReplaceFile 在少数失败情况下已把原程序改名为备份
+            if (!File.Exists(target) && File.Exists(backup))
+            {
+                try { File.Move(backup, target); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Log.Error($"无法从 {backup} 还原原来的版本", ex);
+                }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// macOS：新的 .app 先完整复制到旁边的临时目录，再把旧包改名为 .old、临时目录改名为原位置（两次改名，不会只剩半个包）；
+    /// 失败时还原旧包。
+    /// </summary>
     private static void ReplaceBundle(string source, string target)
     {
+        var temp = target + ".tmp";
         var backup = target + OldSuffix;
+        DeletePath(temp);
+        try
+        {
+            CopyDirectory(source, temp);
+        }
+        catch
+        {
+            TryDelete(temp);
+            throw;
+        }
+
         DeletePath(backup);
         if (Directory.Exists(target))
             Directory.Move(target, backup);
         try
         {
-            CopyDirectory(source, target);
+            Directory.Move(temp, target);
         }
         catch
         {
-            DeletePath(target);
-            if (Directory.Exists(backup))
+            if (!Directory.Exists(target) && Directory.Exists(backup))
                 Directory.Move(backup, target);
+            TryDelete(temp);
             throw;
         }
         TryDelete(backup);
     }
 
-    /// <summary>删除上次更新留下的 .new（以及 macOS 的 .old）。替换进程可能还没完全退出，删不掉就稍后重试。</summary>
+    /// <summary>删除上次更新留下的 .new、.old（替换前的原程序）和 .tmp。替换进程可能还没完全退出，删不掉就稍后重试。</summary>
     public static void CleanupOldVersion()
     {
         if (Current() is not { } current)
             return;
-        var leftovers = new[] { current + NewSuffix, current + OldSuffix }
+        var leftovers = new[] { current + NewSuffix, current + OldSuffix, current + ".tmp" }
             .Where(p => File.Exists(p) || Directory.Exists(p))
             .ToList();
         if (leftovers.Count == 0)

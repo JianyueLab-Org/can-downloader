@@ -58,15 +58,34 @@ public partial class SettingsWindow : Window
 
     private void OnOkClick(object? sender, RoutedEventArgs e)
     {
-        Vm.Save();
+        if (!TrySave())
+            return;
         _accepted = true;
         Close(true);
     }
 
     private void OnApplyClick(object? sender, RoutedEventArgs e)
     {
-        Vm.Save();
-        _snapshot = Vm.Snapshot();
+        if (TrySave())
+            _snapshot = Vm.Snapshot();
+    }
+
+    /// <summary>保存设置。失败时在底部显示原因，窗口不关闭、修改保持未保存，“取消”仍还原到上次成功保存的设置。</summary>
+    private bool TrySave()
+    {
+        try
+        {
+            Vm.Save();
+            SaveErrorText.IsVisible = false;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SaveErrorText.Text = $"保存设置失败：{ex.Message}";
+            ToolTip.SetTip(SaveErrorText, SaveErrorText.Text);
+            SaveErrorText.IsVisible = true;
+            return false;
+        }
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);

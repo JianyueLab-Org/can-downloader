@@ -65,10 +65,17 @@ public static class InstallationTransaction
                 Directory.CreateDirectory(backupRoot);
                 foreach (var change in changes.Values)
                 {
-                    // 不穿过符号链接，也不覆盖用户的目录。冲突在修改任何正式文件前发现。
+                    // 仅检查安装目录及其内部；macOS 的 /var -> /private/var 等系统祖先链接是合法路径。
+                    var installRoot = journal.InstallRoots.Select(Path.GetFullPath)
+                        .Where(r => change.Target.StartsWith(Path.TrimEndingDirectorySeparator(r) + Path.DirectorySeparatorChar,
+                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                        .OrderByDescending(r => r.Length).First();
                     for (var path = change.Target; path is not null; path = Path.GetDirectoryName(path))
+                    {
                         if (Path.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
                             throw new IOException($"安装路径包含链接：{path}");
+                        if (Paths.Equals(Path.TrimEndingDirectorySeparator(path), Path.TrimEndingDirectorySeparator(installRoot))) break;
+                    }
                     if (Directory.Exists(change.Target))
                         throw new IOException($"安装目标是目录，无法替换为文件：{change.Target}");
                     if (File.Exists(change.Target))

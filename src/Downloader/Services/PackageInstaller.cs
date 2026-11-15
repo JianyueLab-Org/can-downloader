@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 
 namespace Downloader.Services;
 
@@ -36,9 +38,27 @@ public static class PackageInstaller
 
     public static string PartialPath(string zipPath) => zipPath + ".part";
 
+    /// <summary>.part 对应的服务器文件标识（强 ETag 或 Last-Modified），续传时用 If-Range 确认还是同一个文件。</summary>
+    private static string ValidatorPath(string zipPath) => PartialPath(zipPath) + ".id";
+
+    /// <summary>删除下载了一半的文件及其标识。</summary>
+    public static void DeletePartial(string zipPath)
+    {
+        foreach (var path in new[] { PartialPath(zipPath), ValidatorPath(zipPath) })
+        {
+            try { File.Delete(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 删不掉不影响 */ }
+        }
+    }
+
     /// <summary>
     /// 下载到 <c>.part</c> 文件，完成后改名为 <paramref name="target"/>。已有 <c>.part</c> 时用 Range 续传；
     /// 服务器不支持续传时从头下载。<paramref name="speedLimit"/> 返回本下载当前的限速（字节/秒，0 为不限）。
+    /// <para>
+    /// 写入数据之前先确认服务器给的还是要下载的那个文件：旧版本的下载地址会被重定向到最新发布，
+    /// 大小与发布信息（<paramref name="expectedSize"/>）不符时抛出 <see cref="ReleaseChangedException"/>，调用方应重新获取发布信息；
+    /// 续传时核对 Content-Range，并用 If-Range 让服务器在文件变了时返回完整内容，不把两个版本的数据拼在一起。
+    /// </para>
     /// </summary>
     public static async Task DownloadAsync(Uri url, string target, long expectedSize, DownloadProgress progress,
         Func<double> speedLimit, CancellationToken ct)
@@ -52,31 +72,63 @@ public static class PackageInstaller
         }
 
         var part = PartialPath(target);
+        var validatorPath = ValidatorPath(target);
         for (var attempt = 0; ; attempt++)
         {
             var offset = File.Exists(part) ? new FileInfo(part).Length : 0;
-            if (expectedSize > 0 && offset >= expectedSize)
+            var validator = offset > 0 ? ReadValidator(validatorPath) : null;
+            // 大小未知又没有文件标识时无法确认 .part 属于同一个文件，从头下载
+            if (offset > 0 && (expectedSize > 0 ? offset >= expectedSize : validator is null))
             {
-                File.Delete(part);
+                DeletePartial(target);
                 offset = 0;
+                validator = null;
             }
 
-            using var response = await CanApi.Shared.GetDownloadAsync(url, offset, ct);
+            using var response = await CanApi.Shared.GetDownloadAsync(url, offset, validator, ct);
             if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
             {
                 // 缓存的半截文件与服务器上的对不上，从头下载
-                File.Delete(part);
+                DeletePartial(target);
                 if (attempt == 0)
                     continue;
                 throw new InvalidDataException("服务器拒绝了续传请求，请重试。");
             }
-            if (offset > 0 && response.StatusCode != HttpStatusCode.PartialContent)
-                offset = 0;
 
-            var total = response.Content.Headers.ContentLength is { } length2 ? offset + length2 : expectedSize;
+            var partial = offset > 0 && response.StatusCode == HttpStatusCode.PartialContent;
+            long total;
+            if (partial)
+            {
+                var range = response.Content.Headers.ContentRange;
+                if (range is not { HasRange: true } || range.From != offset)
+                {
+                    // 续传的位置不对，不能接在 .part 后面
+                    DeletePartial(target);
+                    if (attempt == 0)
+                        continue;
+                    throw new InvalidDataException("服务器返回的续传数据与已下载的部分不一致，请重试。");
+                }
+                total = range.Length ?? (response.Content.Headers.ContentLength is { } rest ? offset + rest : expectedSize);
+            }
+            else
+            {
+                offset = 0;
+                total = response.Content.Headers.ContentLength ?? expectedSize;
+            }
+
+            if (expectedSize > 0 && total > 0 && total != expectedSize)
+            {
+                // 一个字节也不写：服务器上已经是另一个发布（例如旧版本地址被重定向到新版本）
+                DeletePartial(target);
+                Log.Warn($"{url} 的大小 {total} 与发布信息 {expectedSize} 不符，发布可能已更新");
+                throw new ReleaseChangedException(expectedSize, total);
+            }
+
+            if (!partial)
+                SaveValidator(validatorPath, response);
             progress.Reset(offset, total);
 
-            await using (var file = new FileStream(part, offset > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write,
+            await using (var file = new FileStream(part, partial ? FileMode.Append : FileMode.Create, FileAccess.Write,
                              FileShare.None, BufferSize, useAsync: true))
             await using (var stream = await response.Content.ReadAsStreamAsync(ct))
             {
@@ -108,12 +160,46 @@ public static class PackageInstaller
             var size = new FileInfo(part).Length;
             if (expectedSize > 0 && size != expectedSize)
             {
-                File.Delete(part);
+                DeletePartial(target);
                 throw new InvalidDataException($"下载的文件大小不符（{size} / {expectedSize} 字节），请重试。");
             }
             File.Move(part, target, overwrite: true);
+            DeletePartial(target);
             return;
         }
+    }
+
+    /// <summary>记下服务器文件的标识，只用强 ETag 或 Last-Modified（If-Range 不接受弱 ETag）。</summary>
+    private static void SaveValidator(string path, HttpResponseMessage response)
+    {
+        var value = response.Headers.ETag is { IsWeak: false } etag ? "etag " + etag.Tag
+            : response.Content.Headers.LastModified is { } modified ? "date " + modified.ToString("R")
+            : null;
+        try
+        {
+            if (value is null)
+                File.Delete(path);
+            else
+                File.WriteAllText(path, value);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 没有标识时只是不能续传 */ }
+    }
+
+    private static RangeConditionHeaderValue? ReadValidator(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+            var text = File.ReadAllText(path).Trim();
+            if (text.StartsWith("etag ", StringComparison.Ordinal))
+                return new RangeConditionHeaderValue(text[5..]);
+            if (text.StartsWith("date ", StringComparison.Ordinal)
+                && DateTimeOffset.TryParse(text[5..], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date))
+                return new RangeConditionHeaderValue(date);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException) { /* 当作没有标识 */ }
+        return null;
     }
 
     /// <summary>核对 SHA-256（发布方提供的值，小写十六进制）。不一致时抛出 <see cref="InvalidDataException"/>。</summary>
@@ -170,12 +256,25 @@ public static class PackageInstaller
             return;
         }
         using var zip = ZipFile.OpenRead(packagePath);
+        var buffer = new byte[BufferSize];
         foreach (var entry in zip.Entries)
         {
             if (entry.FullName.EndsWith('/'))
                 continue;
-            using var stream = entry.Open();
-            stream.CopyTo(Stream.Null);
+            // 解压时不核对 CRC32：存储（不压缩）的条目内容被改了也能正常读出，这里逐个计算并核对
+            var crc = Crc32.Initial;
+            long length = 0;
+            using (var stream = entry.Open())
+            {
+                int read;
+                while ((read = stream.Read(buffer)) > 0)
+                {
+                    crc = Crc32.Append(crc, buffer.AsSpan(0, read));
+                    length += read;
+                }
+            }
+            if (length != entry.Length || Crc32.Finish(crc) != entry.Crc32)
+                throw new InvalidDataException($"安装包已损坏：{entry.FullName} 校验失败。");
         }
     }
 
@@ -339,6 +438,40 @@ public static class PackageInstaller
         }
         return top is null || top.EndsWith(".app/", StringComparison.OrdinalIgnoreCase) ? "" : top;
     }
+}
+
+/// <summary>服务器上的安装包与发布信息不符（发布已更新），需要重新获取发布信息后再下载。</summary>
+public sealed class ReleaseChangedException(long expected, long actual)
+    : Exception($"服务器上的安装包已更新（{actual} 字节，发布信息为 {expected} 字节），需要重新获取发布信息。");
+
+/// <summary>zip 使用的 CRC-32（IEEE 802.3，多项式 0xEDB88320）。</summary>
+internal static class Crc32
+{
+    public const uint Initial = 0xFFFFFFFF;
+
+    private static readonly uint[] Table = BuildTable();
+
+    private static uint[] BuildTable()
+    {
+        var table = new uint[256];
+        for (uint i = 0; i < 256; i++)
+        {
+            var c = i;
+            for (var k = 0; k < 8; k++)
+                c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+        return table;
+    }
+
+    public static uint Append(uint crc, ReadOnlySpan<byte> data)
+    {
+        foreach (var b in data)
+            crc = Table[(crc ^ b) & 0xFF] ^ (crc >> 8);
+        return crc;
+    }
+
+    public static uint Finish(uint crc) => crc ^ 0xFFFFFFFF;
 }
 
 /// <summary>用系统默认方式打开网址、文件夹或程序（Windows 是 ShellExecute，macOS 是 open，Linux 是 xdg-open）。</summary>
