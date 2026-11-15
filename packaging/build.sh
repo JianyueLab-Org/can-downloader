@@ -31,8 +31,7 @@ case "$target" in
     publish "$target"
     bash packaging/macos/make-app.sh "dist/CAN Downloader.app" "$version" "publish/${target}"
     out="CAN-Downloader-${version}-${target}.zip"
-    rm -f "dist/${out}"
-    (cd dist && ditto -c -k --keepParent "CAN Downloader.app" "$out")
+    bash packaging/macos/package.sh "dist/CAN Downloader.app" "dist/${out}"
     ;;
   linux-x64 | linux-arm64)
     publish "$target"

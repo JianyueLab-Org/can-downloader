@@ -1,26 +1,27 @@
 #!/bin/sh
 # 把下载器装到当前用户目录并加入应用菜单，适用于各 Linux 发行版，不需要 root：
-#   程序   ~/.local/share/can-downloader/Downloader（目录可写，下载器能自动更新；数据、日志、默认安装目录也在这里）
+#   程序   ~/.local/bin/CAN/downloader/Downloader
 #   命令   ~/.local/bin/can-downloader
 #   菜单   ~/.local/share/applications/can-downloader.desktop
-# 卸载：./install.sh --uninstall（保留 ~/.local/share/can-downloader 里的数据和已安装的软件）
+# 卸载：./uninstall.sh（保留数据和已安装的软件），兼容 ./install.sh --uninstall
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 share=${XDG_DATA_HOME:-$HOME/.local/share}
-dir="$share/can-downloader"
+dir="$HOME/.local/bin/CAN/downloader"
 command="$HOME/.local/bin/can-downloader"
 desktop="$share/applications/can-downloader.desktop"
 icon="$share/icons/hicolor/64x64/apps/can-downloader.png"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$dir/Downloader" "$dir/app-logo.png" "$command" "$desktop" "$icon"
-  echo "已卸载。数据和已安装的软件仍在 $dir，不需要时手动删除。"
-  exit 0
+  shift
+  exec sh "$here/uninstall.sh" "$@"
 fi
 
 mkdir -p "$dir" "$(dirname "$command")" "$(dirname "$desktop")" "$(dirname "$icon")"
 cp "$here/app-logo.png" "$icon"
+cp "$here/uninstall.sh" "$dir/uninstall.sh"
+chmod 755 "$dir/uninstall.sh"
 # 先复制到临时文件再改名：下载器正在运行时也能覆盖
 cp "$here/Downloader" "$dir/Downloader.tmp"
 chmod 755 "$dir/Downloader.tmp"

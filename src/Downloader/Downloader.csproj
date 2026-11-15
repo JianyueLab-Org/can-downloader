@@ -30,6 +30,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets/app.ico" />
     <AvaloniaResource Include="Assets/app-logo.png" />
+    <AvaloniaResource Include="Assets/icons/*.svg" />
     <EmbeddedResource Include="Assets/catalog.json" LogicalName="catalog.json" />
     <None Include="Assets/catalog.json" Link="catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>

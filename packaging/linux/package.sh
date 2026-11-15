@@ -16,6 +16,7 @@ trap 'rm -rf "$staging"' EXIT
 mkdir "${staging}/can-downloader"
 install -m 755 "${publish}/Downloader" "${staging}/can-downloader/Downloader"
 install -m 755 "${here}/install.sh" "${staging}/can-downloader/install.sh"
+install -m 755 "${here}/uninstall.sh" "${staging}/can-downloader/uninstall.sh"
 install -m 644 "${here}/can-downloader.desktop" "${staging}/can-downloader/can-downloader.desktop"
 install -m 644 "${here}/../../src/Downloader/Assets/app-logo.png" "${staging}/can-downloader/app-logo.png"
 

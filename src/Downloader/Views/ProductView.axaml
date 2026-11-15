@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Downloader.ViewModels"
+             xmlns:v="using:Downloader.Views"
              x:Class="Downloader.Views.ProductView"
              x:DataType="vm:ProductViewModel">
   <!--
@@ -21,9 +22,7 @@
     <!-- ===== 标题 ===== -->
     <Border DockPanel.Dock="Top" Classes="productHeader">
       <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-        <Border Classes="tile large" Background="{Binding TileBackground}">
-          <TextBlock Text="{Binding Icon}" Foreground="{Binding TileForeground}" />
-        </Border>
+        <v:ProductTile Classes="large" />
 
         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
           <StackPanel Orientation="Horizontal" Spacing="8">

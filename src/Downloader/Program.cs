@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using Downloader.Services;
 using Downloader.ViewModels;
 
@@ -9,7 +10,7 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        Log.Info($"启动 {AppInfo.Name} {AppInfo.Version}，{PlatformInfo.Name}，程序目录 {AppPaths.Program}{(AppPaths.Base == AppPaths.Program ? "" : $"，数据目录 {AppPaths.Base}")}，参数 [{string.Join(' ', args)}]");
+        Log.Info($"启动 {AppInfo.Name} {AppInfo.Version}，{PlatformInfo.Name}");
         if (CanApi.BaseUri.Host != CanApi.ApiHost)
             Log.Warn($"使用环境变量 CAN_API_URL 指定的 API：{CanApi.BaseUri}");
         // 自更新的第二步：本次启动只为把新版本复制到原位置，不显示界面
@@ -30,5 +31,15 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new X11PlatformOptions { WmClass = "can-downloader", EnableSessionManagement = false })
+            .With(new FontManagerOptions
+            {
+                FontFallbacks = new[]
+                {
+                    "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+                    "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Segoe UI Symbol",
+                    "Apple Symbols", "DejaVu Sans", "Noto Sans Symbols 2", "Noto Sans Symbols"
+                }.Select(name => new FontFallback { FontFamily = new FontFamily(name) }).ToArray()
+            })
             .LogToTrace();
 }

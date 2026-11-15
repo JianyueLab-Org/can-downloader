@@ -9,7 +9,11 @@ namespace Downloader.Views;
 
 public partial class MainWindow : Window
 {
-    public MainWindow() => InitializeComponent();
+    public MainWindow()
+    {
+        InitializeComponent();
+        PlatformInfo.PrepareFloatingWindow(this);
+    }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
 
