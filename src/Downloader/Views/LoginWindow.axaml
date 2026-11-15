@@ -37,8 +37,10 @@
           <TextBlock Classes="appName" Text="{Binding AppName}" />
           <TextBlock Classes="caption mono"><Run Text="版本 " /><Run Text="{Binding CurrentVersion}" /></TextBlock>
         </StackPanel>
-        <Button Grid.Column="2" Classes="ghost icon danger" Content="✕" VerticalAlignment="Top"
-                ToolTip.Tip="退出" Click="OnCloseClick" />
+        <Button Grid.Column="2" Classes="ghost icon danger" VerticalAlignment="Top"
+                ToolTip.Tip="退出" Click="OnCloseClick">
+          <PathIcon Classes="close" />
+        </Button>
       </Grid>
 
       <!-- ===== 登录前更新下载器 ===== -->

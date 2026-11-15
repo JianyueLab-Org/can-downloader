@@ -1,5 +1,5 @@
 {
-  // 软件库的显示信息：分类、名称、图标、简介。软件本身由 GET /api/v1/clients/latest 决定——
+  // 软件库的显示信息：分类、名称、图标、简介。icon 是 Assets/icons 里的 SVG 文件名，或图标块上的文字。软件本身由 GET /api/v1/clients/latest 决定——
   // API 新增的客户端即使这里没有条目也会出现（归入“其他”，显示 API 里的名称）。
   // 文字取自 https://ceruleanavi.net/downloads。
 
@@ -13,7 +13,7 @@
       "id": "audio-for-can",
       "name": "Audio for CAN",
       "category": "atc",
-      "icon": "AU",
+      "icon": "audio-for-can.svg",
       "color": "#3DBE84",
       "summary": "管制员语音客户端",
       "description": "管制员语音客户端。一栈频率，每个频率带 RX / TX / XC。管制席位必需，需配合 EuroScope 使用。",
@@ -23,7 +23,7 @@
       "id": "atis-for-can",
       "name": "ATIS for CAN",
       "category": "atc",
-      "icon": "AT",
+      "icon": "atis-for-can.svg",
       "color": "#5BC0D8",
       "summary": "情报通播（ATIS）客户端",
       "description": "情报通播（ATIS）客户端。自动获取天气，中英双语播出。",
@@ -33,7 +33,7 @@
       "id": "can-pilot",
       "name": "CAN Pilot Client",
       "category": "pilot",
-      "icon": "CP",
+      "icon": "can-pilot.svg",
       "color": "#4C8BF5",
       "summary": "MSFS 与 X-Plane 通用的飞行员客户端（新版）",
       "description": "新一代 C# 飞行员客户端：一个程序同时支持 MSFS 2020 / 2024 和 X-Plane 11 / 12，完成登录、FSD 连线、语音、消息和飞行计划，不需要 Python。X-Plane 插件在安装目录的 XPC_for_CAN-plugin.zip 里。",

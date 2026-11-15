@@ -232,7 +232,7 @@ public sealed class CanApi
                 ? $"{text}（HTTP {(int)response.StatusCode}）"
                 : $"服务器返回错误 HTTP {(int)response.StatusCode}。"
         };
-        Log.Warn($"API 错误 {(int)response.StatusCode} {code}：{body?.Message}");
+        Log.Warn($"API 错误 HTTP {(int)response.StatusCode}");
         return new ApiException(code, message, response.StatusCode);
     }
 }

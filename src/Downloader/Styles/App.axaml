@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="using:Downloader.Views">
   <!-- 业务界面专用样式（启动窗口、提示条、软件库、软件详情、下载进度）。颜色均来自 Tokens.axaml。 -->
 
   <!-- 面板容器：工具栏、侧栏、底部按钮栏 -->
@@ -83,20 +84,28 @@
     <Setter Property="CornerRadius" Value="{DynamicResource Radius.Overlay}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
-  <Style Selector="Border.tile > TextBlock">
+  <Style Selector="Border.tile TextBlock">
     <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="FontFamily" Value="{DynamicResource Font.Mono}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSize.Base}" />
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
-  <Style Selector="Border.tile.large">
+  <Style Selector="Border.tile Viewbox">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+  </Style>
+  <Style Selector="v|ProductTile.large Border.tile">
     <Setter Property="Width" Value="52" />
     <Setter Property="Height" Value="52" />
     <Setter Property="CornerRadius" Value="8" />
   </Style>
-  <Style Selector="Border.tile.large > TextBlock">
+  <Style Selector="v|ProductTile.large Border.tile TextBlock">
     <Setter Property="FontSize" Value="18" />
+  </Style>
+  <Style Selector="v|ProductTile.large Border.tile Viewbox">
+    <Setter Property="Width" Value="30" />
+    <Setter Property="Height" Value="30" />
   </Style>
 
   <!-- ========== 启动窗口 ========== -->

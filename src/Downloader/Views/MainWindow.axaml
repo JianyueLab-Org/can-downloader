@@ -77,8 +77,12 @@
           </StackPanel>
 
           <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
-            <Button Classes="ghost icon" Content="—" FontSize="10" ToolTip.Tip="最小化" Click="OnMinimizeClick" />
-            <Button Classes="ghost icon danger" Content="✕" ToolTip.Tip="退出" Click="OnExitClick" />
+            <Button Classes="ghost icon" ToolTip.Tip="最小化" Click="OnMinimizeClick">
+              <PathIcon Classes="minimize" />
+            </Button>
+            <Button Classes="ghost icon danger" ToolTip.Tip="退出" Click="OnExitClick">
+              <PathIcon Classes="close" />
+            </Button>
           </StackPanel>
         </Grid>
       </Border>
@@ -94,9 +98,11 @@
                 <Button Grid.Column="2" Classes="small" Content="{Binding ActionText}" IsVisible="{Binding HasAction}"
                         Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).InvokeNoticeCommand}"
                         CommandParameter="{Binding}" />
-                <Button Grid.Column="3" Classes="ghost icon small" Content="✕" ToolTip.Tip="关闭"
+                <Button Grid.Column="3" Classes="ghost icon small" ToolTip.Tip="关闭"
                         Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).DismissNoticeCommand}"
-                        CommandParameter="{Binding}" />
+                        CommandParameter="{Binding}">
+                  <PathIcon Classes="close small" />
+                </Button>
               </Grid>
             </Border>
           </DataTemplate>
@@ -131,9 +137,7 @@
                 <DataTemplate x:DataType="vm:ProductViewModel">
                   <Grid RowDefinitions="*,Auto">
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" Margin="0,6">
-                      <Border Classes="tile" Background="{Binding TileBackground}">
-                        <TextBlock Text="{Binding Icon}" Foreground="{Binding TileForeground}" />
-                      </Border>
+                      <views:ProductTile />
                       <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Classes="productName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Classes="productStatus" Classes.installed="{Binding IsInstalledState}"

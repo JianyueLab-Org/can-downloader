@@ -1,0 +1,5 @@
+// 将此规则加入 niri 配置，可让下载器始终以浮动窗口打开。
+window-rule {
+    match app-id=r#"^can-downloader$"#
+    open-floating true
+}

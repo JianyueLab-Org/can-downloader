@@ -53,6 +53,8 @@ public sealed partial class ProductViewModel : LibraryEntry
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _categoryName = "";
     [ObservableProperty] private string _icon = "";
+    /// <summary>SVG 图标（catalog.json 的 icon 是 .svg 文件名时），没有时图标块显示 <see cref="Icon"/> 文字。</summary>
+    [ObservableProperty] private Services.SvgIcon? _iconSvg;
     [ObservableProperty] private IBrush _tileForeground = Brushes.Gray;
     [ObservableProperty] private IBrush _tileBackground = Brushes.Transparent;
     [ObservableProperty] private string _summary = "";
@@ -212,7 +214,10 @@ public sealed partial class ProductViewModel : LibraryEntry
         Name = product.Name;
         CategoryId = product.Category;
         CategoryName = categoryName;
-        Icon = string.IsNullOrWhiteSpace(product.Icon) ? product.Name[..1] : product.Icon;
+        IconSvg = Services.SvgIcon.IsSvgName(product.Icon) ? Services.SvgIcon.Load(product.Icon) : null;
+        Icon = string.IsNullOrWhiteSpace(product.Icon) || Services.SvgIcon.IsSvgName(product.Icon)
+            ? Initials(product.Name)
+            : product.Icon;
         Summary = product.Summary;
         Description = product.Description;
         LatestVersion = product.Version;
@@ -271,6 +276,17 @@ public sealed partial class ProductViewModel : LibraryEntry
             entry.IsCurrent = InstalledVersion is not null && VersionUtil.Compare(entry.Version, InstalledVersion) == 0;
             entry.IsNew = InstalledVersion is not null && VersionUtil.IsNewer(entry.Version, InstalledVersion);
         }
+    }
+
+    /// <summary>没有图标时的文字：名称里各单词的首字母（最多两个），如 “Audio for CAN” → “AC”。</summary>
+    private static string Initials(string name)
+    {
+        var letters = name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => char.IsUpper(w[0]) || char.IsDigit(w[0]))
+            .Select(w => w[0])
+            .Take(2)
+            .ToArray();
+        return letters.Length > 0 ? new string(letters) : name[..Math.Min(1, name.Length)].ToUpperInvariant();
     }
 }
 

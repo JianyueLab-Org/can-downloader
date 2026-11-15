@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Downloader.ViewModels"
+             x:Class="Downloader.Views.ProductTile"
+             x:DataType="vm:ProductViewModel"
+             VerticalAlignment="Center">
+  <!-- 软件图标块：有 SVG 图标时画线条图标，否则显示文字；颜色来自清单。大号加 Classes="large" -->
+  <Border Classes="tile" Background="{Binding TileBackground}">
+    <Panel>
+      <TextBlock Text="{Binding Icon}" Foreground="{Binding TileForeground}"
+                 IsVisible="{Binding IconSvg, Converter={x:Static ObjectConverters.IsNull}}" />
+      <Viewbox IsVisible="{Binding IconSvg, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Canvas Width="24" Height="24">
+          <Path Data="{Binding IconSvg.Data, FallbackValue={x:Null}}" Stroke="{Binding TileForeground}"
+                StrokeThickness="{Binding IconSvg.StrokeWidth, FallbackValue=1.6}"
+                StrokeLineCap="Round" StrokeJoin="Round" />
+        </Canvas>
+      </Viewbox>
+    </Panel>
+  </Border>
+</UserControl>

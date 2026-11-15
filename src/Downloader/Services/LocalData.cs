@@ -145,7 +145,9 @@ public static class LocalData
 /// <summary>登录选项与自动登录用的 OAuth refresh 令牌。</summary>
 public sealed class AccountSettings
 {
-    public bool AutoLogin { get; set; } = true;
+    public bool AutoLogin { get; set; }
+
+    public DateTimeOffset? RetentionExpiresAt { get; set; }
 
     /// <summary>refresh 令牌（每次刷新都会换新）。Windows 上用 DPAPI 加密（只有当前用户能解开），macOS / Linux 上文件权限为只有当前用户可读写（600）。</summary>
     public string? RefreshToken { get; set; }
@@ -156,7 +158,14 @@ public static class AccountStore
     private const string FileName = "account.json";
     private static readonly byte[] Entropy = "CAN-Downloader-oauth"u8.ToArray();
 
-    public static AccountSettings Load() => LocalData.Load<AccountSettings>(FileName) ?? new AccountSettings();
+    public static AccountSettings Load()
+    {
+        var settings = LocalData.Load<AccountSettings>(FileName) ?? new AccountSettings();
+        if (settings.RefreshToken is not null
+            && (!settings.AutoLogin || settings.RetentionExpiresAt is null || settings.RetentionExpiresAt <= DateTimeOffset.UtcNow))
+            SaveRefreshToken(settings, null);
+        return settings;
+    }
 
     public static void Save(AccountSettings settings) => LocalData.Save(FileName, settings);
 
@@ -183,6 +192,7 @@ public static class AccountStore
         if (refreshToken is null)
         {
             settings.RefreshToken = null;
+            settings.RetentionExpiresAt = null;
         }
         else
         {
@@ -190,6 +200,7 @@ public static class AccountStore
             if (OperatingSystem.IsWindows())
                 bytes = ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser);
             settings.RefreshToken = Convert.ToBase64String(bytes);
+            settings.RetentionExpiresAt = DateTimeOffset.UtcNow.AddDays(30);
         }
         Save(settings);
     }

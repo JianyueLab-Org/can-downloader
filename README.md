@@ -2,11 +2,11 @@
 
 基于 [Avalonia](https://avaloniaui.net/) 的 CAN 软件下载器：安装、更新 CAN 的各个客户端（CAN Pilot Client、C# Audio for CAN、C# ATIS for CAN）。界面风格与 [can-client-ui](https://github.com/JianyueLab-Org/can-client-ui) 相同：深色、扁平、紧凑，同一套代码发布 Windows、macOS（仅 Apple Silicon ARM64）、Linux（通用 tar.gz）三个平台，软件库只列出有本机平台安装包的软件。
 
-已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载、下载器自更新。
+已接入 [CAN API](https://api.ceruleanavi.net)（源码 can-api）：账号登录、客户端发布信息、安装包下载、下载器自更新。下表的接口都直接请求 `https://api.ceruleanavi.net`，不经过 `https://ceruleanavi.net/api/...` 的兼容转发（该转发 2027-01-01 起不再保证可用）；网站上只用到 OAuth 授权页（在浏览器中打开）。
 
 | 功能 | API |
 |---|---|
-| 登录（OAuth 2.1 授权码 + PKCE，公开客户端，在 [platform.ceruleanavi.net](https://platform.ceruleanavi.net/) 注册） | 发现文档 `/.well-known/openid-configuration`；授权页 `https://ceruleanavi.net/oauth/authorize`；`/api/oauth/token`、`/api/oauth/userinfo`、`/api/oauth/revoke` |
+| 登录（OAuth 2.1 授权码 + PKCE，公开客户端，在 [platform.ceruleanavi.net](https://platform.ceruleanavi.net/) 注册） | 发现文档 `/.well-known/openid-configuration`；授权页 `https://ceruleanavi.net/oauth/authorize`（由发现文档给出）；`/api/oauth/token`、`/api/oauth/userinfo`、`/api/oauth/revoke` |
 | 软件列表与版本 | `GET /api/v1/clients/latest`：`apps` 是独立发布的程序（`audio-for-can`、`atis-for-can`、`can-pilot`、`can-downloader`），各自有版本、SHA-256 和发布说明；`clients` 保留给旧消费者，同名条目以 `apps` 为准，只显示一次 |
 | 下载器自更新 | `apps.can-downloader`（下载地址同下） |
 | 各平台安装包 | `clients.<名称>.platforms` / `apps.<名称>.platforms`（可选）：以平台标识为键（`win-x64`、`osx-arm64`、`osx-universal`、`linux-x64`、`linux-arm64`），值为 `{download, origin, size, sha256}`。没有时顶层地址是 Windows 版，见下面“平台” |
@@ -43,7 +43,7 @@ API 里有、catalog.json 里没有的客户端也会出现，归入“其他”
 |---|---|---|
 | Windows x64 | `CAN-Downloader-<版本>-win-x64.zip` | 只含 `Downloader.exe`，便携 |
 | macOS 12+（ARM64） | `CAN-Downloader-<版本>-osx-arm64.zip` | `CAN Downloader.app`，仅支持 Apple Silicon，包内直接使用 ARM64 单文件程序。ad-hoc 签名、没有公证：用浏览器下载的话第一次打开前执行 `xattr -dr com.apple.quarantine "/Applications/CAN Downloader.app"` |
-| Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/share/can-downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
+| Linux（x64） | `CAN-Downloader-<版本>-linux-x64.tar.gz` | 解压后直接运行 `can-downloader/Downloader`，或 `./install.sh` 装到 `~/.local/bin/CAN/downloader` 并加入应用菜单。依赖 glibc、ICU、fontconfig、X11 库（Wayland 下经 XWayland）和中文字体 |
 
 下载器按本机平台挑安装包（`ViewModels/Manifest.cs`）：API 给出 `platforms` 时按优先顺序挑（macOS 优先 `osx-arm64`，兼容客户端的 `osx-universal` 通用包）；没有 `platforms` 时顶层地址是 Windows 版，macOS / Linux 按文件名约定把 GitHub 原始地址里的 `-win-x64.zip` 换成 `-osx-arm64.zip` / `-linux-x64.tar.gz`，只能从 GitHub 下载，SHA-256 从同一发布的 `SHA256SUMS` 查。都没有的软件不出现在软件库里。
 
@@ -64,6 +64,8 @@ macOS 同样一个程序一个子文件夹。安装后也可运行 `.app/Content
 
 上述 `uninstall.sh` 仅用于卸载 CAN Downloader，不用于卸载客户端。客户端通过下载器中的“卸载”功能、客户端自带的卸载器（如有）或手动删除其独立目录进行卸载；下载器中的“卸载”只删除该客户端记录的文件和对应安装记录，不影响其他客户端。
 
+窗口与字体适配沿用 can-client-ui：矢量窗口按钮、中文与符号字体回退、macOS 无边框窗口边缘缩放，以及 Linux niri 默认浮动。niri 也可使用 `contrib/niri/can-downloader.kdl` 中的窗口规则。
+
 ## 目录（便携）
 
 所有目录默认都在下载器程序所在的目录下，整个目录复制走即可带走。程序目录不能写时放到用户目录：macOS 的 `.app` 包（`~/Library/Application Support/CAN Downloader`）、Linux 不可写目录（如 `/opt`，数据放 `~/.local/share/CAN Downloader`，或 `$XDG_DATA_HOME`）。Windows 始终在 exe 所在目录。
@@ -74,6 +76,8 @@ macOS 同样一个程序一个子文件夹。安装后也可运行 `.app/Content
 | `downloads/` | 安装包缓存；下载先写 `.part`，暂停或网络中断后用 Range 续传 |
 | `data/` | `settings.json` 设置、`installs.json` 安装记录、`account.json` 自动登录选项与 refresh 令牌（Windows 上 DPAPI 加密；macOS / Linux 上目录 700、文件 600） |
 | `logs/` | 日志，每天一个文件（`2026-10-23.log`）；记录启动、每个 API 请求、登录结果、下载 / 安装 / 卸载、错误。不记录令牌和授权码 |
+
+日志自动保留最近 30 天，并隐藏用户目录、邮箱和网络地址中的敏感内容。自动登录默认关闭，启用后保存的授权在本地最多保留 30 天，每次刷新后重新计时；退出登录会清除授权。
 
 不要把下载器放在 `Program Files` 这类需要管理员权限才能写入的目录。
 

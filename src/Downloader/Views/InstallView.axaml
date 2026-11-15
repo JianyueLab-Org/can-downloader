@@ -1,15 +1,14 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Downloader.ViewModels"
+             xmlns:v="using:Downloader.Views"
              x:Class="Downloader.Views.InstallView"
              x:DataType="vm:InstallViewModel"
              Width="400">
   <!-- 安装对话框：版本、安装位置（设置里可关闭）、组件（来自清单）、依赖项、磁盘空间 -->
   <StackPanel>
     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-      <Border Classes="tile" Background="{Binding Product.TileBackground}">
-        <TextBlock Text="{Binding Product.Icon}" Foreground="{Binding Product.TileForeground}" />
-      </Border>
+      <v:ProductTile DataContext="{Binding Product}" />
       <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
         <TextBlock Classes="productName" Text="{Binding Product.Name}" />
         <TextBlock Classes="caption mono"><Run Text="{Binding Product.LatestVersion}" /><Run Text=" · " /><Run Text="{Binding Product.ReleaseDate}" /></TextBlock>

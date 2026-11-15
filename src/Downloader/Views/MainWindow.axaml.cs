@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        PlatformInfo.PrepareFloatingWindow(this);
         // 对话框打开期间，键盘只作用于对话框：先于窗口里的控件拦下按键与文字输入
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnPreviewTextInput, RoutingStrategies.Tunnel);

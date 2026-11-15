@@ -167,7 +167,7 @@ public static class OAuthLogin
         if (!response.IsSuccessStatusCode || body?.AccessToken is not { Length: > 0 } access)
         {
             var error = body?.Error ?? "http_" + (int)response.StatusCode;
-            Log.Warn($"OAuth：令牌请求失败 {error}：{body?.ErrorDescription}");
+            Log.Warn("OAuth：令牌请求失败");
             throw new ApiException(error, error switch
             {
                 "invalid_grant" => "登录已过期或已在网站上撤销，请重新登录。",

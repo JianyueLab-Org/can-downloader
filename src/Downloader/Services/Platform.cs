@@ -8,6 +8,27 @@ namespace Downloader.Services;
 /// </summary>
 public static class PlatformInfo
 {
+    public static bool NeedsManualResize => OperatingSystem.IsMacOS();
+
+    /// <summary>niri 初次映射窗口时先固定尺寸，获得焦点后恢复缩放。</summary>
+    public static void PrepareFloatingWindow(Avalonia.Controls.Window window)
+    {
+        if (!OperatingSystem.IsLinux() || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NIRI_SOCKET")) || !window.CanResize)
+            return;
+        window.CanResize = false;
+        var restored = false;
+        void Restore()
+        {
+            if (restored) return;
+            restored = true;
+            window.Activated -= OnActivated;
+            window.CanResize = true;
+        }
+        void OnActivated(object? sender, EventArgs e) => Restore();
+        window.Activated += OnActivated;
+        window.Opened += (_, _) => Avalonia.Threading.DispatcherTimer.RunOnce(Restore, TimeSpan.FromSeconds(3));
+    }
+
     /// <summary>按实际可执行文件路径检查，包含 .app 内和安装目录内的辅助进程。</summary>
     public static void ThrowIfRunning(string installDir)
     {
