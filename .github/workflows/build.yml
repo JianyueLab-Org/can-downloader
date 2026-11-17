@@ -24,8 +24,9 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # 只取消同一 PR 的旧运行；main 与 tag 的运行可能要发布，不能被下一次推送取消
+  # PR：同一 PR 只保留最新一次运行。main 与 tag 的运行可能要发布，每次运行单独一组：
+  # 同一组最多只排队一个，共用一组时排队中的发布会被下一次推送替换掉
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -272,12 +273,30 @@ jobs:
           set -euo pipefail
           tag="v${VERSION}"
           files=(packages/*.zip packages/*.tar.gz packages/SHA256SUMS)
+
+          # main 的运行在这里打 tag（tag 已存在时 push 失败，不会改动它）。构建期间别的运行可能已经发布了同一版本，
+          # 所以不论是否由本次创建，都重新读取 tag 指向的提交：不是本次构建的提交就停止，不覆盖那个发布的安装包
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/${tag}" || echo "tag ${tag} 已存在（可能由其他运行创建），核对它指向的提交"
+          fi
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+          tagged=$(git rev-parse "${tag}^{commit}")
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              echo "::error::tag ${tag} 现在指向 ${tagged}，不是本次构建的 ${GITHUB_SHA}，不上传"
+              exit 1
+            fi
+            echo "::warning::${tag} 已在另一个提交 ${tagged} 上发布，本次（${GITHUB_SHA}）不发布；要发布本次的改动请提高 <Version>"
+            exit 0
+          fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
             # 0.x 是预发布；1.0.0 起为正式版，标为正式版与最新版
             if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false --latest; fi
           elif [[ "$VERSION" == 0.* ]]; then
-            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --target "$GITHUB_SHA" --prerelease
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --prerelease
           else
-            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --target "$GITHUB_SHA" --latest
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest
           fi
