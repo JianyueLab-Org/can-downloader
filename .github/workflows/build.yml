@@ -291,12 +291,22 @@ jobs:
             exit 0
           fi
 
+          # 0.x 是预发布；1.0.0 起为正式版。main 的各次运行并行，旧版本可能更晚发布完，
+          # 所以只在本版本不低于当前最新版时标为最新版，不把最新版标记抢回旧版本
+          current=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          current=${current#v}
+          latest=true
+          newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n1)
+          if [ -n "$current" ] && [ "$current" != "$VERSION" ] && [ "$newest" = "$current" ]; then
+            latest=false
+            echo "::warning::当前最新版是 ${current}，比 ${VERSION} 新，${tag} 不标为最新版"
+          fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
-            # 0.x 是预发布；1.0.0 起为正式版，标为正式版与最新版
-            if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false --latest; fi
+            if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false --latest="$latest"; fi
           elif [[ "$VERSION" == 0.* ]]; then
             gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --prerelease
           else
-            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest="$latest"
           fi
