@@ -301,11 +301,20 @@ jobs:
             gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest=false
           fi
 
-      # main 的各次运行并行，旧版本可能更晚发布完。不比较“当前 Latest”（读与写之间会被别的运行插入），
-      # 而是每次都把全部正式版里版本最高的标为 Latest：最后执行这一步的运行能看到所有已创建的 Release，结果总会收敛到最高版本
+  # main 的各次运行并行，旧版本可能更晚发布完，所以 Latest 不在发布时设置，而是发布后把全部正式版里版本最高的标为 Latest。
+  # “列出 → 设置”放在所有运行共用的并发组里串行执行，中间不会被别的运行插入；
+  # 排队中的校正被更新的运行替换时，替换它的运行做同样的校正、看得到更多 Release，所以不会漏
+  latest:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-latest
+      cancel-in-progress: false
+    steps:
       - name: 校正最新版
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           top=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName' \
