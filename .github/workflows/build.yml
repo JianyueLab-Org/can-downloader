@@ -1,6 +1,9 @@
 # 编译与发布（Windows、macOS、Linux）
-# - 推送到 main、提交 PR：三个平台都编译、打包，并在 macOS / Linux 上真正启动一次（冒烟测试），安装包作为构建产物上传（保留 14 天）
-# - 推送 tag v<版本号>（与 Downloader.csproj 的 <Version> 一致）：另外把全部安装包和 SHA256SUMS 上传到同名 GitHub Release
+# - 提交 PR、推送到 main：三个平台都编译、打包，并在 macOS / Linux 上真正启动一次（冒烟测试），安装包作为构建产物上传（保留 14 天）
+# - PR 合并进 main（推送到 main）时，如果 Downloader.csproj 的 <Version> 还没有对应的 tag v<版本号>：
+#   打 tag 并把全部安装包和 SHA256SUMS 发布到同名 GitHub Release。所以要发新版本，就在 PR 里改 <Version>；
+#   版本号没变的 PR 合并后只编译，不发布（PR 的检查里会提示）
+# - 手动推送 tag v<版本号>（与 <Version> 一致）同样会发布
 #   （Release 不存在时自动创建；已手动创建并写好发布说明时只上传 / 覆盖安装包，不改说明）
 # - 也可在 Actions 页面手动运行（不发布 Release）
 #
@@ -21,8 +24,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # PR：同一 PR 只保留最新一次运行。main 与 tag 的运行可能要发布，每次运行单独一组：
+  # 同一组最多只排队一个，共用一组时排队中的发布会被下一次推送替换掉
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOTNET_NOLOGO: true
@@ -34,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.release.outputs.release }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -53,6 +59,30 @@ jobs:
             exit 1
           fi
           echo "版本号 ${version}"
+
+      # 是否发布：推送 tag 时发布；推送到 main 时，tag v<版本号> 还不存在才发布（版本号没变就只编译）
+      - name: 判断是否发布
+        id: release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then exists=true; else exists=false; fi
+          release=false
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            release=true
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ] && [ "$exists" = false ]; then
+            release=true
+            echo "::notice::${tag} 尚未发布，本次构建完成后发布"
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if [ "$exists" = true ]; then
+              echo "::notice::Downloader.csproj 的版本号 ${VERSION} 已经发布过（${tag}），合并后不会发布新版本；要发布请在本 PR 里提高 <Version>"
+            else
+              echo "::notice::合并后会发布 ${tag}"
+            fi
+          fi
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
 
   windows:
     needs: version
@@ -208,7 +238,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: github.ref_type == 'tag'
+    if: needs.version.outputs.release == 'true'
     needs: [version, windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
@@ -241,14 +271,54 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          tag=$GITHUB_REF_NAME
+          tag="v${VERSION}"
           files=(packages/*.zip packages/*.tar.gz packages/SHA256SUMS)
+
+          # main 的运行在这里打 tag（tag 已存在时 push 失败，不会改动它）。构建期间别的运行可能已经发布了同一版本，
+          # 所以不论是否由本次创建，都重新读取 tag 指向的提交：不是本次构建的提交就停止，不覆盖那个发布的安装包
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/${tag}" || echo "tag ${tag} 已存在（可能由其他运行创建），核对它指向的提交"
+          fi
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+          tagged=$(git rev-parse "${tag}^{commit}")
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              echo "::error::tag ${tag} 现在指向 ${tagged}，不是本次构建的 ${GITHUB_SHA}，不上传"
+              exit 1
+            fi
+            echo "::warning::${tag} 已在另一个提交 ${tagged} 上发布，本次（${GITHUB_SHA}）不发布；要发布本次的改动请提高 <Version>"
+            exit 0
+          fi
+
+          # 0.x 是预发布；1.0.0 起为正式版。Latest 不在这里设置，由下一步统一校正
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
-            # 0.x 是预发布；1.0.0 起为正式版，标为正式版与最新版
-            if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false --latest; fi
+            if [[ "$VERSION" != 0.* ]]; then gh release edit "$tag" --prerelease=false; fi
           elif [[ "$VERSION" == 0.* ]]; then
             gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --prerelease
           else
-            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest
+            gh release create "$tag" "${files[@]}" --title "CAN 下载器 ${VERSION}" --generate-notes --verify-tag --latest=false
           fi
+
+  # main 的各次运行并行，旧版本可能更晚发布完，所以 Latest 不在发布时设置，而是发布后把全部正式版里版本最高的标为 Latest。
+  # “列出 → 设置”放在所有运行共用的并发组里串行执行，中间不会被别的运行插入；
+  # 排队中的校正被更新的运行替换时，替换它的运行做同样的校正、看得到更多 Release，所以不会漏
+  latest:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-latest
+      cancel-in-progress: false
+    steps:
+      - name: 校正最新版
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          top=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName' \
+                | grep -E '^v[0-9]+(\.[0-9]+)*$' | sort -V | tail -n1 || true)
+          if [ -z "$top" ]; then echo "没有正式版"; exit 0; fi
+          gh release edit "$top" --latest
+          echo "最新版：${top}"
